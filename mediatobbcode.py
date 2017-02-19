@@ -28,11 +28,16 @@ parse_media = False
 
 # Determines the directory to use when looking for media files to process.
 # Only applies if "parse_media = True".
-clips_path = './videos'
+media_dir = './videos'
 
-# Will enable recursive searching for files. Meaning it will include all sub-directories of "clips_path".
+# Will enable recursive searching for files. Meaning it will include all sub-directories of "media_dir".
 # Only applies if "parse_media = True".
-clips_path_recursive = False
+media_dir_recursive = False
+
+# Enables parsing of compressed (ZIP) archives for image-sets. All image-sets will be output below other parsed media.
+# Only applies if "parse_media = True".
+# Requires Pillow
+parse_zip = False
 
 
 # These settings determine the output formatting. Be careful when using "embed_images" with "output_as_table".
@@ -43,11 +48,11 @@ clips_path_recursive = False
 output_as_table = True
 
 # Generate a separate output file for each directory successfully traversed recursively.
-# Only applies if "parse_media = True" and "clips_path_recursive = True".
+# Only applies if "parse_media = True" and "media_dir_recursive = True".
 output_individual = False
 
 # Generate separators (with the directory name) when switching directories in recursive mode.
-# Only applies if "parse_media = True" and "clips_path_recursive = True" and "output_individual = False"
+# Only applies if "parse_media = True" and "media_dir_recursive = True" and "output_individual = False"
 output_separators = True
 
 # Generate a nice heading above the table/list.
@@ -83,7 +88,8 @@ output_html = False
 def parse_media_files():
 	"""
 	Uses the pymediainfo module to parse each file in a directory (recursively), and extract media information from
-	each video-clip. It creates Clip objects and stores it in a clips list for later use.
+	each video-clip (or image-set). It creates Clip objects and stores it in a clips list for later use.
+	Requires MediaInfo
 	"""
 	try:
 		from pymediainfo import MediaInfo
@@ -92,20 +98,36 @@ def parse_media_files():
 		sys.exit()
 
 	clips = []
+	imagesets = []
 	ran_at_all = False  # canary - general
 	parsed_at_all = False  # canary - for when output_individual has cleared clips[] after sending to output
 
-	for root, dirs, files in os.walk(clips_path):
+	# ignore some common file-extensions often found alongside videos  # TODO unix is case-sensitive :(
+	skip_ext = ['.jpg', '.JPG', '.jpeg', 'JPEG', '.png', '.PNG', '.gif', '.GIF', '.psd', '.ai',
+				'.txt', '.nfo', '.NFO', '.doc', '.xml', '.csv', '.pdf', '.part',
+				'.flac', '.mp3', '.acc', '.wav', '.pls', '.m3u', '.torrent']
+	zip_ext = ['.zip', '.ZIP', '.7z', '.7Z', '.gz', '.GZ', '.tar', '.TAR', '.rar', '.RAR']
+	if parse_zip:
+		zip_ext = tuple(zip_ext)
+	else:
+		skip_ext.extend(zip_ext)
+	skip_ext = tuple(skip_ext)
+
+	for root, dirs, files in os.walk(media_dir):
 		print('\nSWITCH dir: {}'.format(root))
 		new_dir = True
 		ran_at_all = True
 
 		for file in files:
-			# ignore some common file-extensions found alongside videos  # TODO unix is case-sensitive :(
-			if file.endswith(('.jpg', '.JPG', '.jpeg', 'JPEG', '.png', '.PNG', '.gif', '.GIF', '.psd', '.ai',
-							'.txt', '.nfo', '.NFO', '.doc', '.xml', '.csv', '.pdf', '.zip', '.gz', '.tar', '.rar',
-							'.flac', '.mp3', '.acc', '.wav', '.pls', '.m3u', '.torrent')):
-				print('skipped file: {}'.format(os.path.join(root, file)))
+			# quickly ignore non-video files to save resources
+			if file.endswith(skip_ext):
+				print(' skipped file: {}'.format(file))
+				continue
+			# if parse_zip is enabled, check ZIP files to see if it's an image-set
+			elif parse_zip and file.endswith(zip_ext):
+				imgset = parse_zip_files(root, file)
+				if imgset:
+					imagesets.append(imgset)
 				continue
 
 			media_info = MediaInfo.parse(os.path.join(root, file))
@@ -122,11 +144,11 @@ def parse_media_files():
 
 			# get the useful bits from the track objects
 			if track_vid:
-				print(' attempt file: {}'.format(os.path.join(root, file)))
+				print(' attempt file: {}'.format(file))
 
 				# create a separator with the relative directory, but only if it's the first valid file in the dir
-				if new_dir and clips_path_recursive and output_separators and not output_individual:
-					current_dir = os.path.relpath(root, clips_path)
+				if new_dir and media_dir_recursive and output_separators and not output_individual:
+					current_dir = os.path.relpath(root, media_dir)
 					if current_dir is not '.':
 						clips.append(current_dir)
 					new_dir = False
@@ -160,25 +182,26 @@ def parse_media_files():
 							vbitrate, vbitrate_alt, vwidth, vheight, vscantype, vframerate, vframerate_alt,
 							acodec, abitrate, asample, aprofile)
 				clips.append(metadata_cleanup(clip))
-				print(' parsed file : {}'.format(os.path.join(root, file)))
+				print(' parsed file : {}'.format(file))
 			else:
 				print('ERROR parsing: {}  -  not a video file?'.format(file))
 
 		# break after top level if we don't want recursive parsing
-		if not clips_path_recursive:
+		if not media_dir_recursive:
 			break
-		elif output_individual and clips:
+		elif output_individual and (clips or imagesets):
 			# output each dir as a separate file, so we need to reset the clips after each successfully parsed dir
 			parsed_at_all = True
-			format_final_output(clips, root)
+			format_final_output(clips + imagesets, root)
 			clips = []
+			imagesets = []
 
 	if not ran_at_all:
-		print('ERROR: invalid directory for: {}'.format(clips_path))
-	elif not clips and not parsed_at_all:
-		print('ERROR: no valid media files found in: '.format(clips_path))
+		print('ERROR: invalid directory for: {}'.format(media_dir))
+	elif not clips and not imagesets and not parsed_at_all:
+		print('ERROR: no valid media files found in: {}'.format(media_dir))
 	elif not output_individual:
-		format_final_output(clips, clips_path)
+		format_final_output(clips + imagesets, media_dir)
 
 
 def parse_csv_files():
@@ -189,7 +212,7 @@ def parse_csv_files():
 	files_tried = files_parsed = 0
 
 	for file in os.listdir('.'):  # path has already been set by os.chdir(working_dir)
-		if file.endswith('.csv') or file.endswith('.CSV'):
+		if file.endswith(('.csv', '.CSV')):
 			print('\nSWITCH CSV: {}'.format(file))
 			files_tried += 1
 			clips = []
@@ -227,6 +250,7 @@ def parse_csv_files():
 
 						# exclude every line that doesn't appear to be a video (only applies to CSV input)
 						if not length or (not vcodec and not vcodec_alt):
+							print(' skipped row: {}'.format(filename))
 							continue
 
 						# create Clip object for easier manipulation and passing around
@@ -255,12 +279,63 @@ def parse_csv_files():
 		print('CSV files tried: {}. CSV files parsed: {}'.format(files_tried, files_parsed))
 
 
-def format_final_output(clips, source):
+def parse_zip_files(root, file):  # TODO add support for rar, 7z, tar, etc.
 	"""
-	Takes the Clips generated from either a single CSV file, or an live dir parsing session, and write the output.
+	Processes a compressed archive and attempt to get information on the image-set located therein.
+	We could have used MediaInfo for this too, but Pillow is easier and more reliable.
+	Requires Pillow
 	"""
-	# no clips? something is wrong
-	if not clips:
+	from zipfile import ZipFile, BadZipFile
+	try:
+		from PIL import Image
+	except ImportError:
+		print('\nERROR: Couldn\'t import Pillow module!\n')
+		return False
+
+	try:
+		print(' attempt archive: {}'.format(file))
+		# each archive is an entire image-set, so we'll get some basic information on the set
+		with ZipFile(os.path.join(root, file)) as archive:
+			img_count = 0
+			max_resolution = (0, 0)
+			filesize = os.path.getsize(os.path.join(root, file))
+			orig_size = 0
+
+			for member in archive.infolist():
+				orig_size += member.file_size
+				# parse each image in the archive to determine the highest image-resolution present
+				with archive.open(member) as img:
+					try:
+						img = Image.open(img)
+						img_count += 1
+						if img.width > max_resolution[0]:
+							max_resolution = img.size
+						img.close()
+					except IOError:
+						# not an image file
+						continue
+
+			if img_count:
+				filesize = readable_number(filesize)
+				orig_size = readable_number(orig_size)
+				print(' parsed archive : {}'.format(file))
+				return ImageSet(root, file, filesize, orig_size, img_count, max_resolution)
+			else:
+				print(' ERROR parsing  : {}  -  no image files in archive?'.format(file))
+
+	except BadZipFile:
+		print(' ERROR parsing  : {}  -  unsupported archive type?'.format(file))
+
+	return False
+
+
+def format_final_output(items, source):
+	"""
+	Takes the items (Clips or ImageSets) generated from either a single CSV file, or an live dir parsing session,
+	and determines the formatting to use (and call the corresponding function), finally writing to the output.
+	"""
+	# no items (clips/image-sets)? something is wrong
+	if not items:
 		print('ERROR: No media clips found! The script shouldn\'t even have gotten this far. o_O')
 		return
 
@@ -269,8 +344,8 @@ def format_final_output(clips, source):
 		if output_individual:
 			# When creating an output file for each parsed directory, we don't want to have to create directories to
 			# the same depth as the source files (in order to keep the file structure). So for directories deeper than
-			# clips_path + 1, we concatenate the dir-names into a long string.
-			relpath = os.path.relpath(source, clips_path)
+			# media_dir + 1, we concatenate the dir-names into a long string.
+			relpath = os.path.relpath(source, media_dir)
 
 			if relpath == '.':
 				working_file = os.path.join(working_dir, os.path.basename(source))
@@ -297,7 +372,7 @@ def format_final_output(clips, source):
 		except (IOError, OSError):
 			print('ERROR: Couldn\'t create output file: {}  (invalid directory?)'.format(file_output))
 			sys.exit()
-		generate_all_layouts(clips, source)
+		generate_all_layouts(items, source)
 		return
 
 	# append the output of every cycle rather than truncating the entire output file
@@ -316,10 +391,6 @@ def format_final_output(clips, source):
 		output.close()
 		print(invalid_combo)
 		sys.exit()  # the only situation where nothing good can come out of it
-
-	# everything seems okay, now we can finally output something useful
-	tags = []
-	clips_parsed = 0
 
 	# get the image data for later use; img_data is a string with error details if no compatible image data was found
 	img_data = get_img_list(file_img_list)
@@ -357,12 +428,17 @@ def format_final_output(clips, source):
 					'[th]Size[/th][th]Length[/th][th]Codec[/th][th]Resolution[/th][th]Audio[/th]{alt}[/tr]\n'
 					.format(alt="[th]Alt.[/th]" if has_alts else ''))
 
-	# iterate over each clip, and do some magic
-	for clip in clips:
+	# everything seems okay, now we can finally output something useful
+	tags = []
+	items_parsed = 0
+	imagesets = []
 
-		# if the clip is a string, it represents the parsing dir of the following clips, i.e. a separator
-		if isinstance(clip, str):
-			output.write(format_row_output(clip, None, None, has_alts, True))
+	# iterate over each item, and do some magic
+	for item in items:
+
+		# if the item is a string, it represents the parsing dir of the following clips/image-sets, i.e. a separator
+		if isinstance(item, str):
+			output.write(format_row_separator(item, has_alts))
 			continue
 
 		# get thumbnail data from image-list and alternative/backup image-list
@@ -371,9 +447,9 @@ def format_final_output(clips, source):
 		for idata in (img_data, img_data_alt):
 			if idata:
 				if 'imagebam' in idata['host']:
-					file_slug = get_screenshot_hash(clip.filename, clip.filepath, 'md5', 6)
+					file_slug = get_screenshot_hash(item.filename, item.filepath, 'md5', 6)
 				else:
-					file_slug = slugify(clip.filename, idata['host'])
+					file_slug = slugify(item.filename, idata['host'])
 
 				match = match_slug(idata['img_list'], file_slug, idata['file'])  # list, can be multiple!
 
@@ -383,22 +459,49 @@ def format_final_output(clips, source):
 				else:
 					img_match = match
 
-		# generate and output the row
-		output.write(format_row_output(clip, img_match, img_match_alt, has_alts))
+		# try to generate performer tags for presentation, see  generate_tags()
+		tags = generate_tags(tags, item.filename)
+
+		# split off all image-sets, since they will be processed later
+		if isinstance(item, ImageSet):
+			imagesets.append({'item': item, 'img_match': img_match, 'img_match_alt': img_match_alt})
+			continue
+
+		# generate and output the item's content row
+		output.write(format_row_output(item, img_match, img_match_alt, has_alts))
 
 		# don't count separators towards the final output
-		if not isinstance(clip, str):
-			clips_parsed += 1
-
-		# try to generate performer tags for presentation, see  generate_tags()
-		tags = generate_tags(tags, clip.filename)
+		if not isinstance(item, str):
+			items_parsed += 1
 
 	# if we choose to output the data as a table, we need to set up the table footer after the last data row
 	if output_as_table:
 		output.write('[/table][/align][/size]')
 
-	output.write('[size=0][align=right]File information for {} items generated by MediaInfo.'.format(clips_parsed))
-	output.write(' Output script by [url=https://github.com/paybas]PayBas[/url].[/align][/size]')  # TODO
+	output.write('[size=0][align=right]File information for {} items generated by MediaInfo. {}[/align][/size]'
+				.format(items_parsed, author))
+
+	# process the image-sets we split-off earlier, and create a separate table/list for them at the bottom
+	if imagesets:
+		if output_section_head:
+			output.write('\n[table=100][tr][td=#0054B0][bg=#003875][align=center][font=Verdana][size=5][color=#FFFFFF]'
+						'[b]IMAGE-SET DETAILS[/b][/color][/size][/font][/align][/bg][/td][/tr][/table]')
+		if output_as_table:
+			output.write('[size=0][align=center][table=100,#f4f4f4]\n[tr][th][align=left]Filename + IMG[/align][/th]'
+						'[th]Images[/th][th]Resolution[/th][th]Size[/th][th]Unpacked[/th]{alt}[/tr]\n'
+						.format(alt="[th]Alt.[/th]" if has_alts else ''))
+
+		imagesets_parsed = 0
+		for imgset in imagesets:
+			# TODO include separators for image-sets as well
+			output.write(format_row_output(imgset['item'], imgset['img_match'], imgset['img_match_alt'], has_alts))
+			imagesets_parsed += 1
+
+		if output_as_table:
+			output.write('[/table][/align][/size]')
+
+		output.write('[size=0][align=right]File information for {} archives generated. {}[/align][/size]'
+					.format(imagesets_parsed, author))
 
 	# append the generated performer tags (if successful) to the output
 	if tags:
@@ -439,9 +542,10 @@ def format_final_output(clips, source):
 		html_file.close()
 
 
-def format_row_output(clip, img_match, img_match_alt, has_alts=False, separator=False):
+def format_row_output(item, img_match, img_match_alt, has_alts=False):
 	"""
-	Generate the row output, change this to suit your needs. Just don't break anything ;)
+	Generate the row output based on the input item (a Clip or an ImageSet). Here we mainly do all operations that are
+	common to both 'table' and 'list' outputs, before calling the functions dealing with their differing sections.
 	"""
 	if img_match and len(img_match) == 1:
 		# format the image link (and thumbnail) into correct BBCode for display
@@ -454,112 +558,150 @@ def format_row_output(clip, img_match, img_match_alt, has_alts=False, separator=
 		# since we don't want to embed the image (or thumbnail), just grab the url to the big version
 		else:
 			img_code = img_match['bburl'] if img_match['bburl'] else img_match['bbimg']
-		img_error = None
+		img_msg = None
 	elif img_match:
-		img_error = '[color=#FF8800]Image conflict![/color]'  # multiple matches
 		img_code = False
+		img_msg = '[color=#FF8800]Image conflict![/color]'  # multiple matches
 	else:
-		img_error = '[color=#FF0000]Image missing![/color]'
 		img_code = False
+		img_msg = '[color=#FF0000]Image missing![/color]'
 
 	# get the url to the full-sized alternative/backup image
 	if has_alts:
 		if img_match_alt and len(img_match_alt) == 1:
 			img_match_alt = img_match_alt[0]
 			img_code_alt = img_match_alt['bburl'] if img_match_alt['bburl'] else img_match_alt['bbimg']
-			img_alt_str = '\n[url={}][b]> Backup Image <[/b][/url]'.format(img_code_alt)
+			img_msg_alt = '\n[url={}][b]> Backup Image <[/b][/url]'.format(img_code_alt)
 		elif img_match_alt:
 			img_code_alt = False
-			img_alt_str = '[color=#FF8800][b]Image conflict![/b][/color]'  # multiple matches
+			img_msg_alt = '[color=#FF8800][b]Image conflict![/b][/color]'  # multiple matches
 		else:
 			img_code_alt = False
-			img_alt_str = '[color=#FF0000][b]Image missing![/b][/color]'
+			img_msg_alt = '[color=#FF0000][b]Image missing![/b][/color]'
 	else:
 		img_code_alt = False
-		img_alt_str = ''
+		img_msg_alt = ''
 
-	# output format differs considerably when outputting as a table
 	if output_as_table:
-		if separator:
-			# most BBCode engines don't support col-span
-			output = '[tr=#AAA][td][align=left][size=2][b]{0}[/b][/size][/align][/td]{1}{1}{1}{1}{1}{alt}[/tr]\n'\
-					.format(clip, '[td][/td]', alt="[td][/td]" if has_alts else '')
-			return output
-
-		if img_code:
-			# make the entire file-name a spoiler link
-			if embed_images and whole_filename_is_link:
-				bbsafe_filename = clip.filename.replace('[', '{').replace(']', '}')
-				col1 = '[spoiler={0}]{1}{2}[/spoiler]'.format(bbsafe_filename, img_code, img_alt_str)
-			# inline spoiler BBCode pushes trailing text to the bottom, so if we embed images, they have to be at the end
-			elif embed_images:
-				col1 = '{0}     [spoiler=IMG]{1}{2}[/spoiler]'.format(clip.filename, img_code, img_alt_str)
-			elif whole_filename_is_link:
-				col1 = '[b][url={1}]{0}[/url][/b]'.format(clip.filename, img_code)
-			else:
-				col1 = '[b][b][url={1}]IMG[/url][/b]  {0}[/b]'.format(clip.filename, img_code)
-		elif suppress_img_warnings:
-			col1 = clip.filename
-		else:
-			col1 = '{0}     {1}'.format(clip.filename, img_error)
-
-		col1 = '[td][align=left][size=2]{}[/size][/align][/td]'.format(col1)
-		col2 = '[td]{}[/td]'.format(clip.filesize)
-		col3 = '[td]{}[/td]'.format(clip.length)
-		col4 = '[td]{0} @ {1}[/td]'.format(clip.vcodec, clip.vbitrate)
-		col5 = '[td]{0}×{1} @ {2} {3}[/td]'.format(clip.vwidth, clip.vheight, clip.vframerate, clip.vscantype)
-		col6 = '[td]{0} {1} @ {2}[/td]'.format(clip.acodec, clip.abitrate, clip.asample)
-
-		if has_alts:
-			if img_code_alt:
-				col7 = '[td][url={0}]IMG[/url][/td]'.format(img_code_alt)
-			elif img_match_alt and len(img_match_alt) > 1:
-				col7 = '[td][b][b][color=#FF8800]![/color][/b][/b][/td]'
-			else:
-				col7 = '[td][b][b][color=#FF0000]?[/color][/b][/b][/td]'
-		else:
-			col7 = ''
-
-		output = '[tr]{0}{1}{2}{3}{4}{5}{6}[/tr]\n'.format(col1, col2, col3, col4, col5, col6, col7)
-
-	# output BBCode as a normal list, this is messier to look at, but more flexible with images (and BBCode support)
+		# output BBCode as a table row
+		output = format_row_table(item, img_code, img_msg, img_code_alt, img_msg_alt, has_alts)
 	else:
-		if separator:
-			# just a boring row with the directory name
-			output = '- [b][i]{}[/i][/b]\n'.format(clip)
-			return output
-
-		filename = clip.filename
-		fmeta = '{0} ~ {1}'.format(clip.filesize, clip.length)
-		vinfo = '{0} {1} ~ {2}×{3} @ {4}'.format(clip.vcodec, clip.vbitrate, clip.vwidth, clip.vheight, clip.vframerate)
-		ainfo = '{0} {1} @ {2}'.format(clip.acodec, clip.abitrate, clip.asample)
-
-		if img_code:
-			if embed_images:
-				img_code = ' [spoiler=:]{0}{1}[/spoiler]'.format(img_code, img_alt_str)
-			elif whole_filename_is_link:
-				filename = '[url={1}]{0}[/url]'.format(filename, img_code)
-				if img_code_alt:
-					filename += '  ([url={}]alt.[/url])'.format(img_code_alt)
-				img_code = ''
-			else:
-				if img_code_alt:
-					filename = '[b][url={1}]IMG[/url][/b] | [url={2}]aIMG[/url]  {0}'\
-							.format(filename, img_code, img_code_alt)
-				else:
-					filename = '[b][url={1}]IMG[/url][/b]  {0}'.format(filename, img_code)
-				img_code = ''
-		elif suppress_img_warnings:
-			img_code = ''
-		else:
-			img_code = '     {0}'.format(img_error)
-
-		sep = ' || '
-
-		output = '[b]{1}[/b][size=0] {0} {3} {0} {4} {0} {5} [/size]{2}\n'\
-			.format(sep, filename, img_code, fmeta, vinfo, ainfo)
+		# output BBCode as a normal list row
+		output = format_row_list(item, img_code, img_msg, img_code_alt, img_msg_alt)
 
 	return output
+
+
+def format_row_table(item, img_code, img_msg, img_code_alt, img_msg_alt, has_alts):
+	"""
+	Formats the output BBCode for an individual item (row) in the resulting table.
+	"""
+	if img_code:
+		# make the entire file-name a spoiler link
+		if embed_images and whole_filename_is_link:
+			bbsafe_filename = item.filename.replace('[', '{').replace(']', '}')
+			col1 = '[spoiler={0}]{1}{2}[/spoiler]'.format(bbsafe_filename, img_code, img_msg_alt)
+		# inline spoiler BBCode pushes trailing text to the bottom, so if we embed images, they have to be at the end
+		elif embed_images:
+			col1 = '{0}     [spoiler=IMG]{1}{2}[/spoiler]'.format(item.filename, img_code, img_msg_alt)
+		elif whole_filename_is_link:
+			col1 = '[b][url={1}]{0}[/url][/b]'.format(item.filename, img_code)
+		else:
+			col1 = '[b][b][url={1}]IMG[/url][/b]  {0}[/b]'.format(item.filename, img_code)
+	elif suppress_img_warnings:
+		col1 = item.filename
+	else:
+		col1 = '{0}     {1}'.format(item.filename, img_msg)
+
+	col1 = '[td][align=left][size=2]{}[/size][/align][/td]'.format(col1)
+
+	if isinstance(item, Clip):
+		col2 = '[td]{}[/td]'.format(item.filesize)
+		col3 = '[td]{}[/td]'.format(item.length)
+		col4 = '[td]{0} @ {1}[/td]'.format(item.vcodec, item.vbitrate)
+		col5 = '[td]{0}×{1} @ {2} {3}[/td]'.format(item.vwidth, item.vheight, item.vframerate, item.vscantype)
+		col6 = '[td]{0} {1} @ {2}[/td]'.format(item.acodec, item.abitrate, item.asample)
+	elif isinstance(item, ImageSet):
+		col2 = '[td]{}[/td]'.format(item.img_count)
+		col3 = '[td]{0}×{1} px[/td]'.format(item.resolution[0], item.resolution[1])
+		col4 = '[td]{}[/td]'.format(item.filesize)
+		col5 = '[td]{}[/td]'.format(item.orig_size)
+		col6 = ''
+	else:
+		print('ERROR: script tried to parse an unknown object! This should never happen.')
+		return ''
+
+	if has_alts:
+		if img_code_alt:
+			col7 = '[td][url={0}]IMG[/url][/td]'.format(img_code_alt)
+		elif 'conflict' in img_msg_alt:
+			col7 = '[td][b][b][color=#FF8800]![/color][/b][/b][/td]'
+		else:
+			col7 = '[td][b][b][color=#FF0000]?[/color][/b][/b][/td]'
+	else:
+		col7 = ''
+
+	return '[tr]{0}{1}{2}{3}{4}{5}{6}[/tr]\n'.format(col1, col2, col3, col4, col5, col6, col7)
+
+
+def format_row_list(item, img_code, img_msg, img_code_alt, img_msg_alt):
+	"""
+	Formats the output BBCode for an individual item (row) in the resulting list.
+	This is messier to look at, but more flexible with images (and BBCode support)
+	"""
+	filename = item.filename
+
+	if img_code:
+		if embed_images:
+			img_code = ' [spoiler=:]{0}{1}[/spoiler]'.format(img_code, img_msg_alt)
+		elif whole_filename_is_link:
+			filename = '[url={1}]{0}[/url]'.format(filename, img_code)
+			if img_code_alt:
+				filename += '  ([url={}]alt.[/url])'.format(img_code_alt)
+			img_code = ''
+		else:
+			if img_code_alt:
+				filename = '[b][url={1}]IMG[/url][/b] | [url={2}]aIMG[/url]  {0}' \
+					.format(filename, img_code, img_code_alt)
+			else:
+				filename = '[b][url={1}]IMG[/url][/b]  {0}'.format(filename, img_code)
+			img_code = ''
+	elif suppress_img_warnings:
+		img_code = ''
+	else:
+		img_code = '     {0}'.format(img_msg)
+
+	sep = ' || '
+
+	if isinstance(item, Clip):
+		fmeta = '{0} ~ {1}'.format(item.filesize, item.length)
+		vinfo = '{0} {1} ~ {2}×{3} @ {4}'.format(item.vcodec, item.vbitrate, item.vwidth, item.vheight, item.vframerate)
+		ainfo = '{0} {1} @ {2}'.format(item.acodec, item.abitrate, item.asample)
+
+		return '[b]{1}[/b][size=0] {0} {3} {0} {4} {0} {5} [/size]{2}\n' \
+			.format(sep, filename, img_code, fmeta, vinfo, ainfo)
+	elif isinstance(item, ImageSet):
+		fmeta = '{0}x ({1}×{2} px)'.format(item.img_count, item.resolution[0], item.resolution[1])
+		fsize = '{}'.format(item.filesize)
+
+		return '[b]{1}[/b][size=0] {0} {3} {0} {4} [/size]{2}\n' \
+			.format(sep, filename, img_code, fmeta, fsize)
+	else:
+		print('ERROR: script tried to parse an unknown object! This should never happen.')
+		return ''
+
+
+def format_row_separator(dir_name, has_alts):
+	"""
+	Formats a separator row with the current parsing directory. For prettier organizing of rows.
+	"""
+	if output_as_table:
+		# most BBCode engines don't support col-span
+		return '[tr=#AAA][td][align=left][size=3][b]{0}[/b][/size][/align][/td]{1}{1}{1}{1}{1}{alt}[/tr]\n' \
+			.format(dir_name, '[td][/td]', alt="[td][/td]" if has_alts else '')
+	else:
+		# just a boring row with the directory name
+		return '[size=2]- [b][i]{}[/i][/b][/size]\n'.format(dir_name)
 
 
 def metadata_cleanup(clip):
@@ -610,6 +752,8 @@ def metadata_cleanup(clip):
 				vcodec = 'MP4v3'
 			elif 'MP42' in vcodec:
 				vcodec = 'MP4v2'
+			elif '263' in vcodec:
+				vcodec = 'H.263'
 			elif len(vcodec) <= 2 and clip.vcodec_alt:
 				vcodec = clip.vcodec_alt
 		elif clip.vcodec_alt:
@@ -733,7 +877,7 @@ def get_img_list(file_img_list, is_alt=False):
 			print('NOTICE: No corresponding alternative image-list found. Looked for: {}'.format(file_img_list))
 			return None
 		else:
-			error = ('WARNING: No corresponding image-list found! Looked for: {}\n'.format(file_img_list))
+			error = ('WARNING: No corresponding image-list found! Looked for: {}'.format(file_img_list))
 			print(error)
 			return error
 
@@ -813,7 +957,7 @@ def get_img_list(file_img_list, is_alt=False):
 	file.close()
 
 	if not img_list:
-		error = ('WARNING: No valid image data in image-list! Check the contents of: {}\n'.format(file_img_list))
+		error = ('WARNING: No valid image data in image-list! Check the contents of: {}'.format(file_img_list))
 		print(error)
 		return error
 	else:
@@ -845,17 +989,17 @@ def get_screenshot_hash(filename, filepath, algorithm, strlen):
 		# commonly named sub-dirs of the same path as the actual video file
 		search_dirs.append(os.path.join(filepath, ss_subdir))
 
-	if parse_media and clips_path_recursive:
+	if parse_media and media_dir_recursive:
 		# path of video relative to master path
-		relpath = os.path.relpath(filepath, clips_path)
+		relpath = os.path.relpath(filepath, media_dir)
 		if relpath is not '.':
 			for ss_subdir in common_ss_subdirs:
 				# for when screenshots are located at the top level dir, but have the same dir structure as the clips
-				search_dirs.append(os.path.join(clips_path, ss_subdir, relpath))
+				search_dirs.append(os.path.join(media_dir, ss_subdir, relpath))
 
 		for ss_subdir in common_ss_subdirs:
-			# commonly named sub-dirs of the top level clips_path (when recursive clip searching is used)
-			search_dirs.append(os.path.join(clips_path, ss_subdir))
+			# commonly named sub-dirs of the top level media_dir (when recursive clip searching is used)
+			search_dirs.append(os.path.join(media_dir, ss_subdir))
 
 	# perform the actual search by traversing all the directories listed, and test all file-name variants in those dirs
 	ss_found = None
@@ -1126,7 +1270,19 @@ class Clip(object):
 		self.aprofile = aprofile
 
 
-def generate_all_layouts(clips, source):
+class ImageSet(object):
+	def __init__(self, filepath, filename, filesize, orig_size, img_count, resolution):
+
+		self.filepath = filepath
+		self.filename = filename
+		self.filesize = filesize
+
+		self.orig_size = orig_size
+		self.img_count = img_count
+		self.resolution = resolution
+
+
+def generate_all_layouts(items, source):
 	"""
 	Hijacks the output function and runs it multiple times with differing settings to generate all possible layouts.
 	"""
@@ -1140,42 +1296,43 @@ def generate_all_layouts(clips, source):
 	output_as_table = True
 	embed_images = True
 	whole_filename_is_link = True
-	format_final_output(clips, source)
+	format_final_output(items, source)
 
 	output_as_table = True
 	embed_images = False
 	whole_filename_is_link = True
-	format_final_output(clips, source)
+	format_final_output(items, source)
 
 	output_as_table = True
 	embed_images = True
 	whole_filename_is_link = False
-	format_final_output(clips, source)
+	format_final_output(items, source)
 
 	output_as_table = True
 	embed_images = False
 	whole_filename_is_link = False
-	format_final_output(clips, source)
+	format_final_output(items, source)
 
 	output_as_table = False
 	embed_images = False
 	whole_filename_is_link = True
-	format_final_output(clips, source)
+	format_final_output(items, source)
 
 	output_as_table = False
 	embed_images = True
 	whole_filename_is_link = False
-	format_final_output(clips, source)
+	format_final_output(items, source)
 
 	output_as_table = False
 	embed_images = False
 	whole_filename_is_link = False
-	format_final_output(clips, source)
+	format_final_output(items, source)
 
 	layouts_busy = False
 
 layouts_busy = False  # don't touch!
 debug_imghost_slugs = False  # for debugging
+author = 'Output script by [url=https://github.com/paybas]PayBas[/url].'  # TODO
 
 
 def main(argv):
@@ -1184,8 +1341,9 @@ def main(argv):
 	"""
 	global working_dir
 	global parse_media
-	global clips_path
-	global clips_path_recursive
+	global media_dir
+	global media_dir_recursive
+	global parse_zip
 
 	global output_as_table
 	global output_individual
@@ -1204,7 +1362,7 @@ def main(argv):
 		'mediatobbcode.py -d <working dir>\n' \
 		'- parse all CSV files in working dir -d\n\n' \
 		'mediatobbcode.py -m <media dir>\n' \
-		'- parse all media files in dir -m and output to: ./files/\n\n' \
+		'- parse all media files in dir -m and output to -m\n\n' \
 		'mediatobbcode.py -d <working dir> -m <media dir>\n' \
 		'- parse all media files in dir -m and output to -d\n\n' \
 		'mediatobbcode.py -d <working dir> -m <media dir> -r\n' \
@@ -1212,7 +1370,7 @@ def main(argv):
 		'For a full list of command-line options, see the online documentation.'
 
 	try:
-		opts, args = getopt.getopt(argv, 'hd:m:rlifbutsawx', ['help', 'dir=', 'mediadir=', 'recursive',
+		opts, args = getopt.getopt(argv, 'hd:m:rzlifbutsawx', ['help', 'dir=', 'mediadir=', 'recursive', 'zip'
 															'list', 'individual', 'flat', 'bare', 'url', 'tinylink',
 															'suppress', 'all', 'webhtml', 'xdebug'])
 	except getopt.GetoptError:
@@ -1228,9 +1386,11 @@ def main(argv):
 			working_dir = arg
 		elif opt in ('-m', '--mediadir'):
 			parse_media = True
-			clips_path = arg
+			media_dir = arg
 		elif opt in ('-r', '--recursive'):
-			clips_path_recursive = True
+			media_dir_recursive = True
+		elif opt in ('-z', '--zip'):
+			parse_zip = True
 
 		elif opt in ('-l', '--list'):
 			output_as_table = False
@@ -1258,18 +1418,22 @@ def main(argv):
 		debug_imghost_matching()
 		sys.exit()
 
-	# some house cleaning before we start
+	# set the correct working_dir
 	if not working_dir:
 		print('ERROR: no working directory specified!')
 		sys.exit()
+	elif parse_media and ('./files' in working_dir):
+		# no working_dir specified from command-line
+		working_dir = os.path.normpath(os.path.expanduser(media_dir))
 	else:
 		working_dir = os.path.normpath(os.path.expanduser(working_dir))
 
-	if parse_media and not clips_path:
+	# set the correct media_dir
+	if parse_media and not media_dir:
 		print('ERROR: no media directory specified!')
 		sys.exit()
-	elif parse_media and clips_path:
-		clips_path = os.path.normpath(os.path.expanduser(clips_path))
+	elif parse_media and media_dir:
+		media_dir = os.path.normpath(os.path.expanduser(media_dir))
 
 	if parse_media:
 		parse_media_files()

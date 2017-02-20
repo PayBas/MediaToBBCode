@@ -80,6 +80,21 @@ all_layouts = False
 output_html = False
 
 
+# Colors, fonts and titles. Alters the look of the output.
+cTHBG = '#003875'  # table header background
+cTHBD = '#0054B0'  # table header border
+cTHF = '#FFF'  # table header font color
+fTH = 'Verdana'  # table header font
+cTBBG = '#F4F4F4'  # table body background
+cTSEP = '#AAA'  # table body separator background
+cWARN = '#F80'  # warning message
+cERR = '#F00'  # error message
+mFileDetails = 'FILE DETAILS'
+mFullSizeSS = 'SCREENS (inline)'
+mFullSizeShow = 'SCREENS'
+mImageSets = 'IMAGE-SET DETAILS'
+
+
 ##########################################################################
 # DON'T TOUCH ANYTHING BELOW THIS LINE UNLESS YOU KNOW WHAT YOU'RE DOING #
 ##########################################################################
@@ -358,12 +373,14 @@ def format_final_output(items, source):
 		file_output_html = working_file + '_output.html'
 		file_img_list = working_file + '.txt'
 		file_img_list_alt = working_file + '_alt.txt'
+		file_img_list_fullsize = working_file + '_fullsize.txt'
 	else:
 		# source is the CSV file-name
 		file_output = os.path.join(source[:-4] + '_output.txt')
 		file_output_html = os.path.join(source[:-4] + '_output.html')
 		file_img_list = os.path.join(source[:-4] + '.txt')
 		file_img_list_alt = os.path.join(source[:-4] + '_alt.txt')
+		file_img_list_fullsize = os.path.join(source[:-4] + '_fullsize.txt')
 
 	# create an output loop for generating all different layouts
 	if all_layouts and not layouts_busy:
@@ -391,6 +408,33 @@ def format_final_output(items, source):
 		output.close()
 		print(invalid_combo)
 		sys.exit()  # the only situation where nothing good can come out of it
+
+	# try to create a list of all the full-sized images (if present) for fast single-click browsing
+	if not all_layouts:
+		try:
+			fs_file = open(file_img_list_fullsize)
+			fs_list = fs_file.read().split()
+
+			# set up the table header before the actual content
+			if output_section_head and output_as_table:
+				output.write('[table=100][tr][td={1}][bg={2}][align=center][font={4}][size=5][color={3}]'
+							'[b]{0}[/b][/color][/size][/font][/align][/bg][/td][/tr][/table]'
+							.format(mFullSizeSS, cTHBD, cTHBG, cTHF, fTH))
+			fs_content = ''
+			first = True
+			for line in fs_list:
+				if first:
+					fs_content += line
+					first = False
+				else:
+					fs_content += '\n' + line
+
+			output.write('[bg={2}]\n[align=center][size=2][spoiler={1}]'
+						'{0}[/spoiler][/size][/align]\n[/bg]\n\n'.format(fs_content, mFullSizeShow, cTBBG))
+
+		except (IOError, OSError):
+			print('NOTICE: No full-size image-list detected. Looked for: {}'.format(file_img_list_fullsize))
+			pass
 
 	# get the image data for later use; img_data is a string with error details if no compatible image data was found
 	img_data = get_img_list(file_img_list)
@@ -420,15 +464,16 @@ def format_final_output(items, source):
 		output.write('\n\nCommand-line options: [size=3][b]{}[/b][/size]\n\n'.format(options))
 
 	# if we choose to output the data as a table, we need to set up the table header before the data first row
-	if output_section_head:
-		output.write('[table=100][tr][td=#0054B0][bg=#003875][align=center][font=Verdana][size=5][color=#FFFFFF]'
-					'[b]FILE DETAILS[/b][/color][/size][/font][/align][/bg][/td][/tr][/table]')
+	if output_section_head and output_as_table:
+		output.write('[table=100][tr][td={1}][bg={2}][align=center][font={4}][size=5][color={3}]'
+					'[b]{0}[/b][/color][/size][/font][/align][/bg][/td][/tr][/table]'
+					.format(mFileDetails, cTHBD, cTHBG, cTHF, fTH))
 	if output_as_table:
-		output.write('[size=0][align=center][table=100,#f4f4f4]\n[tr][th][align=left]Filename + IMG[/align][/th]'
+		output.write('[size=0][align=center][table=100,{bgc}]\n[tr][th][align=left]Filename + IMG[/align][/th]'
 					'[th]Size[/th][th]Length[/th][th]Codec[/th][th]Resolution[/th][th]Audio[/th]{alt}[/tr]\n'
-					.format(alt="[th]Alt.[/th]" if has_alts else ''))
+					.format(alt="[th]Alt.[/th]" if has_alts else '', bgc=cTBBG))
 
-	# everything seems okay, now we can finally output something useful
+	# everything seems okay, now we can finally output something usefulz
 	tags = []
 	items_parsed = 0
 	imagesets = []
@@ -483,13 +528,14 @@ def format_final_output(items, source):
 
 	# process the image-sets we split-off earlier, and create a separate table/list for them at the bottom
 	if imagesets:
-		if output_section_head:
-			output.write('\n[table=100][tr][td=#0054B0][bg=#003875][align=center][font=Verdana][size=5][color=#FFFFFF]'
-						'[b]IMAGE-SET DETAILS[/b][/color][/size][/font][/align][/bg][/td][/tr][/table]')
+		if output_section_head and output_as_table:
+			output.write('\n[table=100][tr][td={1}][bg={2}][align=center][font={4}][size=5][color={3}]'
+						'[b]{0}[/b][/color][/size][/font][/align][/bg][/td][/tr][/table]'
+						.format(mImageSets, cTHBD, cTHBG, cTHF, fTH))
 		if output_as_table:
-			output.write('[size=0][align=center][table=100,#f4f4f4]\n[tr][th][align=left]Filename + IMG[/align][/th]'
+			output.write('[size=0][align=center][table=100,{bgc}]\n[tr][th][align=left]Filename + IMG[/align][/th]'
 						'[th]Images[/th][th]Resolution[/th][th]Size[/th][th]Unpacked[/th]{alt}[/tr]\n'
-						.format(alt="[th]Alt.[/th]" if has_alts else ''))
+						.format(alt="[th]Alt.[/th]" if has_alts else '', bgc=cTBBG))
 
 		imagesets_parsed = 0
 		for imgset in imagesets:
@@ -561,10 +607,10 @@ def format_row_output(item, img_match, img_match_alt, has_alts=False):
 		img_msg = None
 	elif img_match:
 		img_code = False
-		img_msg = '[color=#FF8800]Image conflict![/color]'  # multiple matches
+		img_msg = '[color={}]Image conflict![/color]'.format(cWARN)  # multiple matches
 	else:
 		img_code = False
-		img_msg = '[color=#FF0000]Image missing![/color]'
+		img_msg = '[color={}]Image missing![/color]'.format(cERR)
 
 	# get the url to the full-sized alternative/backup image
 	if has_alts:
@@ -574,10 +620,10 @@ def format_row_output(item, img_match, img_match_alt, has_alts=False):
 			img_msg_alt = '\n[url={}][b]> Backup Image <[/b][/url]'.format(img_code_alt)
 		elif img_match_alt:
 			img_code_alt = False
-			img_msg_alt = '[color=#FF8800][b]Image conflict![/b][/color]'  # multiple matches
+			img_msg_alt = '[color={}][b]Image conflict![/b][/color]'.format(cWARN)  # multiple matches
 		else:
 			img_code_alt = False
-			img_msg_alt = '[color=#FF0000][b]Image missing![/b][/color]'
+			img_msg_alt = '[color={}][b]Image missing![/b][/color]'.format(cERR)
 	else:
 		img_code_alt = False
 		img_msg_alt = ''
@@ -635,9 +681,9 @@ def format_row_table(item, img_code, img_msg, img_code_alt, img_msg_alt, has_alt
 		if img_code_alt:
 			col7 = '[td][url={0}]IMG[/url][/td]'.format(img_code_alt)
 		elif 'conflict' in img_msg_alt:
-			col7 = '[td][b][b][color=#FF8800]![/color][/b][/b][/td]'
+			col7 = '[td][b][b][color={}]![/color][/b][/b][/td]'.format(cWARN)
 		else:
-			col7 = '[td][b][b][color=#FF0000]?[/color][/b][/b][/td]'
+			col7 = '[td][b][b][color={}]?[/color][/b][/b][/td]'.format(cERR)
 	else:
 		col7 = ''
 
@@ -697,8 +743,8 @@ def format_row_separator(dir_name, has_alts):
 	"""
 	if output_as_table:
 		# most BBCode engines don't support col-span
-		return '[tr=#AAA][td][align=left][size=3][b]{0}[/b][/size][/align][/td]{1}{1}{1}{1}{1}{alt}[/tr]\n' \
-			.format(dir_name, '[td][/td]', alt="[td][/td]" if has_alts else '')
+		return '[tr={2}][td][align=left][size=3][b]{0}[/b][/size][/align][/td]{1}{1}{1}{1}{1}{alt}[/tr]\n' \
+			.format(dir_name, '[td][/td]', cTSEP, alt="[td][/td]" if has_alts else '')
 	else:
 		# just a boring row with the directory name
 		return '[size=2]- [b][i]{}[/i][/b][/size]\n'.format(dir_name)
@@ -1332,7 +1378,7 @@ def generate_all_layouts(items, source):
 
 layouts_busy = False  # don't touch!
 debug_imghost_slugs = False  # for debugging
-author = 'Output script by [url=https://github.com/paybas]PayBas[/url].'  # TODO
+author = 'Output script by [url=https://github.com/PayBas/MediaToBBCode]PayBas[/url].'  # TODO
 
 
 def main(argv):

@@ -60,7 +60,7 @@ There are 2 basic workflows: using CSV or using direct media parsing.
 
 \** _As requested by some anonymous users ;)._
 
-\** _If you want to add an additional image-host as a backup in case the primary host goes down, simply add an extra txt containing the host's output in a file with the `_alt` suffix (`my-clips_alt.txt` in this example)_
+\*** _If you want to add an additional image-host as a backup in case the primary host goes down, simply add an extra txt containing the host's output in a file with the `_alt` suffix (`my-clips_alt.txt` in this example)_
 
 #### CSV example
 Files (relative paths in this example):

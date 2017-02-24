@@ -102,7 +102,7 @@ Files (absolute paths in this example):
     |-- Michael Jackson on Tour.wmv
 
 ~/Desktop/post one/foo.txt   (BBCode output with 3 or 5 entries, provided by image-host)
-~/Desktop/post one/foo.txt   (BBCode output with 5 entries, provided by image-host)
+~/Desktop/post all/foo.txt   (BBCode output with 5 entries, provided by image-host)
 ````
 Run: `python3 mediatobbcode.py -d "~/Desktop/post one" -m /mnt/foo`
 

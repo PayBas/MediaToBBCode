@@ -41,7 +41,8 @@ parse_zip = False
 
 
 # These settings determine the output formatting. Be careful when using "embed_images" with "output_as_table".
-# I strongly advise using small/medium thumbnail images if you want to embed them, or they will break the table layout.
+# I strongly advise using small/medium thumbnail images if you want to embed them _and_ your website doesn't support
+# the [thumb] BBCode tag, or they will break the table layout.
 
 # Generate table output. If not, a simpler (ugly) flat list will be generated.
 # Requires support for [table] tags by the BBCode engine used by your website.
@@ -66,6 +67,9 @@ embed_images = True
 # Instead of having a small link next to the file-name, to the full-sized image, the whole title will be a link.
 # When combined with "embed_images", this will make the whole file-name a spoiler tag.
 whole_filename_is_link = True
+
+# Determines if embedded images will use the [thumb] BBCode tag, or [img].
+support_bbcode_thumb = True
 
 # Prevents those red warning messages from appearing in the output if no suitable image/link was found.
 suppress_img_warnings = False
@@ -439,8 +443,12 @@ def format_final_output(items, source):
 	# get the image data for later use; img_data is a string with error details if no compatible image data was found
 	img_data = get_img_list(file_img_list)
 	if isinstance(img_data, str):
-		output.write(img_data + '\n\n')
-		img_data = None
+		img_error_msg = img_data
+		# just in case users use the script wrong (by only providing _fullsize.txt containing direct links)
+		img_data = get_img_list(file_img_list_fullsize)
+		if isinstance(img_data, str):
+			output.write(img_error_msg + '\n\n')
+			img_data = None
 
 	# get a second set of image data to provide alternative image-links in case the primary image-host should die
 	has_alts = False
@@ -599,6 +607,8 @@ def format_row_output(item, img_match, img_match_alt, has_alts=False):
 		if embed_images:
 			if img_match['bburl']:
 				img_code = '[url={1}][img]{0}[/img][/url]'.format(img_match['bbimg'], img_match['bburl'])
+			elif support_bbcode_thumb:
+				img_code = '[thumb]{0}[/thumb]'.format(img_match['bbimg'])
 			else:
 				img_code = '[img]{0}[/img]'.format(img_match['bbimg'])
 		# since we don't want to embed the image (or thumbnail), just grab the url to the big version
@@ -1397,6 +1407,7 @@ def main(argv):
 	global output_section_head
 	global embed_images
 	global whole_filename_is_link
+	global support_bbcode_thumb
 	global suppress_img_warnings
 	global all_layouts
 	global output_html
@@ -1416,9 +1427,9 @@ def main(argv):
 		'For a full list of command-line options, see the online documentation.'
 
 	try:
-		opts, args = getopt.getopt(argv, 'hd:m:rzlifbutsawx', ['help', 'dir=', 'mediadir=', 'recursive', 'zip'
+		opts, args = getopt.getopt(argv, 'hd:m:rzlifbutnsawx', ['help', 'dir=', 'mediadir=', 'recursive', 'zip'
 															'list', 'individual', 'flat', 'bare', 'url', 'tinylink',
-															'suppress', 'all', 'webhtml', 'xdebug'])
+															'nothumb', 'suppress', 'all', 'webhtml', 'xdebug'])
 	except getopt.GetoptError:
 		print(h)
 		sys.exit(2)
@@ -1450,6 +1461,8 @@ def main(argv):
 			embed_images = False
 		elif opt in ('-t', '--tinylink'):
 			whole_filename_is_link = False
+		elif opt in ('-n', '--nothumb'):
+			support_bbcode_thumb = False
 		elif opt in ('-s', '--suppress'):
 			suppress_img_warnings = True
 		elif opt in ('-a', '--all'):

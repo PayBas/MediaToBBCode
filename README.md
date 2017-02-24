@@ -136,6 +136,7 @@ Output:
 * `-b` or `--bare` Stops the table heading from being automatically generated. Use this if the BBCode engine on your website doesn't support `[table]` tags or if you simply don't like it.
 * `-u` or `--url` Embeds a simple link to the full-sized image in the output, rather than a thumbnail (which links to the same image). Use this if the BBCode engine on your website doesn't support `[spoiler]` tags.
 * `-t` or `--tinylink` Instead of the whole file-name being a link to the full-sized image (or a `[spoiler]` tag), a smaller link to the same image will be inserted in the row instead.
+* `-n` or `--nothumb` Will force embedded images to be output using the `[img]` tag. Use this if the BBCode engine on your website doesn't support `[thumb]` tags. 
 * `-s` or `--suppress` Prevents warning messages from appearing in the output if no suitable image or image-link was found.
 * `-a` or `--all` Will output all 7 different layout options below each other, easy for testing and picking your favorite. Note that this will include layouts with `[table]` and `[spoiler]` tags, so be careful if these aren't supported.
 * `-x` or `--xdebug` For debugging image-host output slugs. Only for developers.

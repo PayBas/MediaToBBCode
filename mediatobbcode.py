@@ -566,34 +566,9 @@ def format_final_output(items, source):
 	output.close()
 	print('Output written to: {}'.format(file_output))
 
-	# 99% broken
+	# convert the final output to HTML code for quicker testing
 	if output_html:
-		try:
-			import bbcode
-		except ImportError:
-			print('ERROR: Couldn\'t import bbcode module! No HTML output will be generated.')
-			return
-
-		try:
-			bbcinput = open(file_output)
-		except (IOError, OSError):
-			print('ERROR: Couldn\'t reopen file for conversion to HTML: {}'.format(file_output))
-			return
-
-		# append the output of every cycle rather than truncating the entire output file
-		write_mode = 'a+' if all_layouts else 'w+'
-		try:
-			html_file = open(file_output_html, write_mode, encoding='utf-8')
-		except (IOError, OSError):
-			print('ERROR: Couldn\'t create HTML output file: {}  (invalid directory?)'.format(file_output_html))
-			return
-
-		content = bbcinput.read()
-		html_content = bbcode.render_html(content)
-		html_file.write(html_content)
-
-		bbcinput.close()
-		html_file.close()
+		format_html_ouput(file_output, file_output_html)
 
 
 def format_row_output(item, img_match, img_match_alt, has_alts=False):
@@ -758,6 +733,90 @@ def format_row_separator(dir_name, has_alts):
 	else:
 		# just a boring row with the directory name
 		return '[size=2]- [b][i]{}[/i][/b][/size]\n'.format(dir_name)
+
+
+def format_html_ouput(file_output, file_output_html):
+	"""
+	Converts the BBCode output directly to HTML. This can be useful when for testing purposes.
+	requires bbcode module ( http://bbcode.readthedocs.io/ )
+	"""
+	try:
+		import bbcode
+	except ImportError:
+		print('ERROR: Couldn\'t import bbcode module! No HTML output will be generated.')
+		return
+
+	try:
+		bbcinput = open(file_output, encoding='utf-8')
+	except (IOError, OSError):
+		print('ERROR: Couldn\'t reopen file for conversion to HTML: {}'.format(file_output))
+		return
+
+	# append the output of every cycle rather than truncating the entire output file
+	write_mode = 'a+' if all_layouts else 'w+'
+	try:
+		html_file = open(file_output_html, write_mode, encoding='utf-8')
+	except (IOError, OSError):
+		print('ERROR: Couldn\'t create HTML output file: {}  (invalid directory?)'.format(file_output_html))
+		return
+
+	content = bbcinput.read().replace('\'', '&#39;')
+	parser = bbcode.Parser(newline='')
+	parser.add_simple_formatter('table', '<table border="1" cellspacing="0">%(value)s</table>')
+	parser.add_simple_formatter('tr', '<tr>%(value)s</tr>')
+	parser.add_simple_formatter('th', '<th>%(value)s</th>')
+	parser.add_simple_formatter('td', '<td>%(value)s</td>')
+
+	def render_align(tag_name, value, options, parent, context):
+		if 'align' in options:
+			align = options['align']
+		else:
+			align = ''
+		return '<div style="text-align: {};">{}</div>'.format(align, value)
+
+	parser.add_formatter('align', render_align)
+
+	def render_bg(tag_name, value, options, parent, context):
+		if 'bg' in options:
+			bg = options['bg']
+		else:
+			bg = ''
+		return '<div style="background: {};">{}</div>'.format(bg, value)
+
+	parser.add_formatter('bg', render_bg)
+
+	def render_size(tag_name, value, options, parent, context):
+		if 'size' in options:
+			size = (int(options['size']) - 1) * 0.25 + 1
+		else:
+			size = '1'
+		return '<span style="font-size: {}em;">{}</span>'.format(size, value)
+
+	parser.add_formatter('size', render_size)
+
+	def render_font(tag_name, value, options, parent, context):
+		if 'font' in options:
+			font = options['font']
+		else:
+			font = ''
+		return '<span style="font-family: {};">{}</span>'.format(font, value)
+
+	parser.add_formatter('font', render_font)
+
+	def render_spoiler(tag_name, value, options, parent, context):
+		if 'spoiler' in options:
+			spoiler = options['spoiler']
+		else:
+			spoiler = ''
+		return '<strong>{}</strong>: <a href="#">Show</a><blockquote style="display: none">{}</blockquote>' \
+			.format(spoiler, value)
+
+	parser.add_formatter('spoiler', render_spoiler)
+
+	html_file.write(parser.format(content).replace('×', '&times;'))
+
+	bbcinput.close()
+	html_file.close()
 
 
 def metadata_cleanup(clip):

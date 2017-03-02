@@ -89,8 +89,8 @@ Output:
 
 ### CSV workflow
 1. Perform steps 1,2,3,4 from the Media parsing workflow instructions.
-1. Use [MediaInfo](http://mediaarea.net/en/MediaInfo) to export a CSV file with all the data of your video clips. Name it `my-clips.csv` and move it to the `./files` directory. *
-1. Put the txt file in the __same__ directory as `my-clips.csv` (usually `./files`)
+1. Use [MediaInfo](http://mediaarea.net/en/MediaInfo) to export a CSV file with all the data of your video clips. Name it something like `my-clips.csv` and move it to the `./files` directory. *
+1. Put the txt file(s) created earlier containing the image-host data in the __same__ directory as `my-clips.csv` (usually `./files`)
 1. Make sure the CSV file and the txt file have the same filename (e.g. `Michael-Jackson.csv` and `Michael-Jackson.txt`), otherwise the script won't be able to combine them.
 1. Run `python3 mediatobbcode.py`. The default parameters should work for this example.
 1. Copy the contents of the generated `my-clips_output.txt` into your presentation. You can usually find it in the `./files` directory.
@@ -143,6 +143,8 @@ dir/
 * `-n` or `--nothumb` Will force embedded images to be output using the `[img]` tag. Use this if the BBCode engine on your website doesn't support `[thumb]` tags. 
 * `-s` or `--suppress` Prevents warning messages from appearing in the output if no suitable image or image-link was found.
 * `-a` or `--all` Will output all 7 different layout options below each other, easy for testing and picking your favorite. Note that this will include layouts with `[table]` and `[spoiler]` tags, so be careful if these aren't supported.
+* `-w` or `--webhtml` Will convert the final BBCode output to HTML. (experimental)
+    * requires: [bbcode](https://pypi.python.org/pypi/bbcode/1.0.19)
 * `-x` or `--xdebug` For debugging image-host output slugs. Only for developers.
 
 ### Support

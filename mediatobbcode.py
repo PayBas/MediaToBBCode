@@ -421,7 +421,7 @@ def format_final_output(items, source):
 
 			# set up the table header before the actual content
 			if output_section_head and output_as_table:
-				output.write('[table=100][tr][td={1}][bg={2}][align=center][font={4}][size=5][color={3}]'
+				output.write('[table=100%][tr][td={1}][bg={2}][align=center][font={4}][size=5][color={3}]'
 							'[b]{0}[/b][/color][/size][/font][/align][/bg][/td][/tr][/table]'
 							.format(mFullSizeSS, cTHBD, cTHBG, cTHF, fTH))
 			fs_content = ''
@@ -473,11 +473,11 @@ def format_final_output(items, source):
 
 	# if we choose to output the data as a table, we need to set up the table header before the data first row
 	if output_section_head and output_as_table:
-		output.write('[table=100][tr][td={1}][bg={2}][align=center][font={4}][size=5][color={3}]'
+		output.write('[table=100%][tr][td={1}][bg={2}][align=center][font={4}][size=5][color={3}]'
 					'[b]{0}[/b][/color][/size][/font][/align][/bg][/td][/tr][/table]'
 					.format(mFileDetails, cTHBD, cTHBG, cTHF, fTH))
 	if output_as_table:
-		output.write('[size=0][align=center][table=100,{bgc}]\n[tr][th][align=left]Filename + IMG[/align][/th]'
+		output.write('[size=0][align=center][table=100%,{bgc}]\n[tr][th][align=left]Filename + IMG[/align][/th]'
 					'[th]Size[/th][th]Length[/th][th]Codec[/th][th]Resolution[/th][th]Audio[/th]{alt}[/tr]\n'
 					.format(alt="[th]Alt.[/th]" if has_alts else '', bgc=cTBBG))
 
@@ -537,11 +537,11 @@ def format_final_output(items, source):
 	# process the image-sets we split-off earlier, and create a separate table/list for them at the bottom
 	if imagesets:
 		if output_section_head and output_as_table:
-			output.write('\n[table=100][tr][td={1}][bg={2}][align=center][font={4}][size=5][color={3}]'
+			output.write('\n[table=100%][tr][td={1}][bg={2}][align=center][font={4}][size=5][color={3}]'
 						'[b]{0}[/b][/color][/size][/font][/align][/bg][/td][/tr][/table]'
 						.format(mImageSets, cTHBD, cTHBG, cTHF, fTH))
 		if output_as_table:
-			output.write('[size=0][align=center][table=100,{bgc}]\n[tr][th][align=left]Filename + IMG[/align][/th]'
+			output.write('[size=0][align=center][table=100%,{bgc}]\n[tr][th][align=left]Filename + IMG[/align][/th]'
 						'[th]Images[/th][th]Resolution[/th][th]Size[/th][th]Unpacked[/th]{alt}[/tr]\n'
 						.format(alt="[th]Alt.[/th]" if has_alts else '', bgc=cTBBG))
 
@@ -567,8 +567,8 @@ def format_final_output(items, source):
 	print('Output written to: {}'.format(file_output))
 
 	# convert the final output to HTML code for quicker testing
-	if output_html:
-		format_html_ouput(file_output, file_output_html)
+	if (output_html and not all_layouts) or (output_html and all_layouts and layouts_last):
+		format_html_output(file_output, file_output_html)
 
 
 def format_row_output(item, img_match, img_match_alt, has_alts=False):
@@ -735,9 +735,9 @@ def format_row_separator(dir_name, has_alts):
 		return '[size=2]- [b][i]{}[/i][/b][/size]\n'.format(dir_name)
 
 
-def format_html_ouput(file_output, file_output_html):
+def format_html_output(file_output, file_output_html):
 	"""
-	Converts the BBCode output directly to HTML. This can be useful when for testing purposes.
+	Converts the BBCode output directly to HTML. This can be useful for rapid testing purposes.
 	requires bbcode module ( http://bbcode.readthedocs.io/ )
 	"""
 	try:
@@ -752,39 +752,70 @@ def format_html_ouput(file_output, file_output_html):
 		print('ERROR: Couldn\'t reopen file for conversion to HTML: {}'.format(file_output))
 		return
 
-	# append the output of every cycle rather than truncating the entire output file
-	write_mode = 'a+' if all_layouts else 'w+'
 	try:
-		html_file = open(file_output_html, write_mode, encoding='utf-8')
+		html_file = open(file_output_html, 'w+', encoding='utf-8')
 	except (IOError, OSError):
 		print('ERROR: Couldn\'t create HTML output file: {}  (invalid directory?)'.format(file_output_html))
 		return
 
-	content = bbcinput.read().replace('\'', '&#39;')
-	parser = bbcode.Parser(newline='')
-	parser.add_simple_formatter('table', '<table border="1" cellspacing="0">%(value)s</table>')
-	parser.add_simple_formatter('tr', '<tr>%(value)s</tr>')
-	parser.add_simple_formatter('th', '<th>%(value)s</th>')
-	parser.add_simple_formatter('td', '<td>%(value)s</td>')
+	content = bbcinput.read()
+	content = content.replace('\'', '±')  # temporary replacement, parser doesn't like '
+
+	# only simple width and background-color options supported for now
+	def render_table(tag_name, value, options, parent, context):
+		width = 'initial'
+		background = 'none'
+
+		if 'table' in options:
+			opts = options['table'].split(',')
+			for opt in opts:
+				if '#' in opt:
+					background = opt
+				elif '%' in opt or 'px' in opt:
+					width = opt
+
+		return '<table style="width: {}; background: {}">{}</table>'.format(width, background, value)
+
+	# only simple background-color options supported for now
+	def render_tr(tag_name, value, options, parent, context):
+		background = 'none'
+
+		if 'tr' in options:
+			opts = options['tr'].split(',')
+			for opt in opts:
+				if '#' in opt:
+					background = opt
+
+		return '<tr style="background: {}">{}</tr>'.format(background, value)
+
+	# only simple background-color options supported for now
+	def render_td(tag_name, value, options, parent, context):
+		background = 'none'
+
+		if 'td' in options:
+			opts = options['td'].split(',')
+			for opt in opts:
+				if '#' in opt:
+					background = opt
+
+		return '<td style="background: {}">{}</td>'.format(background, value)
 
 	def render_align(tag_name, value, options, parent, context):
 		if 'align' in options:
 			align = options['align']
 		else:
-			align = ''
+			align = 'inherit'
 		return '<div style="text-align: {};">{}</div>'.format(align, value)
 
-	parser.add_formatter('align', render_align)
-
+	# only simple hex supported for now
 	def render_bg(tag_name, value, options, parent, context):
 		if 'bg' in options:
-			bg = options['bg']
+			color = options['bg']
 		else:
-			bg = ''
-		return '<div style="background: {};">{}</div>'.format(bg, value)
+			color = ''
+		return '<div style="background: {};">{}</div>'.format(color, value)
 
-	parser.add_formatter('bg', render_bg)
-
+	# ranges from 0.75em (0) up to 3.25em (10)
 	def render_size(tag_name, value, options, parent, context):
 		if 'size' in options:
 			size = (int(options['size']) - 1) * 0.25 + 1
@@ -792,28 +823,46 @@ def format_html_ouput(file_output, file_output_html):
 			size = '1'
 		return '<span style="font-size: {}em;">{}</span>'.format(size, value)
 
-	parser.add_formatter('size', render_size)
-
 	def render_font(tag_name, value, options, parent, context):
 		if 'font' in options:
 			font = options['font']
 		else:
-			font = ''
+			font = 'inherit'
 		return '<span style="font-family: {};">{}</span>'.format(font, value)
 
-	parser.add_formatter('font', render_font)
-
+	# hide/show is handled with CSS
 	def render_spoiler(tag_name, value, options, parent, context):
 		if 'spoiler' in options:
-			spoiler = options['spoiler']
+			link = options['spoiler']
 		else:
-			spoiler = ''
-		return '<strong>{}</strong>: <a href="#">Show</a><blockquote style="display: none">{}</blockquote>' \
-			.format(spoiler, value)
+			link = 'HTML parsing error?'
+		return '<strong>{}</strong>: <a href="javascript:void(0);" class="sp">Show</a>' \
+			'<blockquote class="bq">{}</blockquote>'.format(link, value)
 
+	parser = bbcode.Parser(newline='<br />\n')
+	parser.add_simple_formatter('th', '<th>%(value)s</th>')
+	parser.add_simple_formatter('img', '<img src="%(value)s">', replace_links=False)
+	parser.add_formatter('table', render_table, transform_newlines=False)
+	parser.add_formatter('tr', render_tr)
+	parser.add_formatter('td', render_td)
+	parser.add_formatter('align', render_align)
+	parser.add_formatter('bg', render_bg)
+	parser.add_formatter('size', render_size)
+	parser.add_formatter('font', render_font)
 	parser.add_formatter('spoiler', render_spoiler)
 
-	html_file.write(parser.format(content).replace('×', '&times;'))
+	html_content = parser.format(content).replace('±', '\'')
+	html_css = \
+		'body {font: normal 10pt "Lucida Grande", Helvetica, Arial, sans-serif; max-width: 1200px; margin: 0 auto;}\n' \
+		'table {border-collapse: collapse;}\n' \
+		'table, tr, td {border: 1px solid #aaa;}\n' \
+		'th, td {padding: 3px 5px;}\n' \
+		'.bq {display: none;}\n' \
+		'a.sp:focus ~ .bq, .bq:focus {display: block;}\n'
+	html_file.write('<!DOCTYPE html>\n<html>\n<head>\n<meta charset="UTF-8">\n<title>Test</title>\n'
+					'<style type="text/css">\n{1}\n</style>\n</head>\n<body>\n{0}\n</body>\n</html>\n'
+					.format(html_content, html_css))
+	print('HTML output written to: {}'.format(file_output_html))
 
 	bbcinput.close()
 	html_file.close()
@@ -1402,7 +1451,9 @@ def generate_all_layouts(items, source):
 	Hijacks the output function and runs it multiple times with differing settings to generate all possible layouts.
 	"""
 	global layouts_busy
+	global layouts_last
 	layouts_busy = True
+	layouts_last = False
 
 	global output_as_table
 	global embed_images
@@ -1438,6 +1489,8 @@ def generate_all_layouts(items, source):
 	whole_filename_is_link = False
 	format_final_output(items, source)
 
+	layouts_last = True
+
 	output_as_table = False
 	embed_images = False
 	whole_filename_is_link = False
@@ -1445,7 +1498,9 @@ def generate_all_layouts(items, source):
 
 	layouts_busy = False
 
+
 layouts_busy = False  # don't touch!
+layouts_last = False  # used to only run format_html_output once
 debug_imghost_slugs = False  # for debugging
 author = 'Output script by [url=https://github.com/PayBas/MediaToBBCode]PayBas[/url].'  # TODO
 

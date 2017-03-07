@@ -2,11 +2,11 @@
 
 import getopt
 import hashlib
-import operator
 import os
-import re
+import threading
 import unicodedata
-import sys
+from tkinter import *
+from tkinter import ttk, filedialog, font, colorchooser, scrolledtext
 from urllib.parse import urlparse
 
 
@@ -15,44 +15,30 @@ from urllib.parse import urlparse
 ##########################################################################
 
 
-# The following settings determine the input for the script, choose wisely.
-
-# The working directory, where CSV files and image-lists should be located, and _output.txt files are written.
-# All CSV files located here will be parsed, so make sure they are properly formatted by MediaInfo.
-working_dir = './files'
-
-# Switches from using CSV as input, to actually generating file information using MediaInfo as the script runs.
-# Requires MediaInfo.dll (32/64bit DLL must match Python environment!)
-parse_media = False
-
-# Determines the directory to use when looking for media files to process.
-# Only applies if "parse_media = True".
+# The directory to use when looking for media files to process.
 media_dir = './videos'
 
+# The output/working directory, where image-host data should be located, and _output.txt files are written.
+output_dir = ''
+
 # Will enable recursive searching for files. Meaning it will include all sub-directories of "media_dir".
-# Only applies if "parse_media = True".
-media_dir_recursive = False
+recursive = False
 
 # Enables parsing of compressed (ZIP) archives for image-sets. All image-sets will be output below other parsed media.
-# Only applies if "parse_media = True".
 # Requires Pillow
 parse_zip = False
 
-
-# These settings determine the output formatting. Be careful when using "embed_images" with "output_as_table".
-# I strongly advise using small/medium thumbnail images if you want to embed them _and_ your website doesn't support
-# the [thumb] BBCode tag, or they will break the table layout.
 
 # Generate table output. If not, a simpler (ugly) flat list will be generated.
 # Requires support for [table] tags by the BBCode engine used by your website.
 output_as_table = True
 
 # Generate a separate output file for each directory successfully traversed recursively.
-# Only applies if "parse_media = True" and "media_dir_recursive = True".
+# Only applies if "recursive = True".
 output_individual = False
 
 # Generate separators (with the directory name) when switching directories in recursive mode.
-# Only applies if "parse_media = True" and "media_dir_recursive = True" and "output_individual = False"
+# Only applies if "recursive = True" and "output_individual = False"
 output_separators = True
 
 # Generate a nice heading above the table/list.
@@ -60,42 +46,44 @@ output_separators = True
 output_section_head = True
 
 # Embed the image/thumbnails in the output. Otherwise a link to the image will be embedded.
+# I strongly advise using small/medium thumbnail images if you want to embed them _and_ your website doesn't support
+# the [thumb] BBCode tag, or they will break the table layout.
 # Requires support for [spoiler] tags by the BBCode engine used by your website.
 embed_images = True
+
+# Determines if embedded images will use the [thumb] BBCode tag, or [img].
+output_bbcode_thumb = True
 
 # Instead of having a small link next to the file-name, to the full-sized image, the whole title will be a link.
 # When combined with "embed_images", this will make the whole file-name a spoiler tag.
 whole_filename_is_link = True
 
-# Determines if embedded images will use the [thumb] BBCode tag, or [img].
-support_bbcode_thumb = True
-
-# Prevents those red warning messages from appearing in the output if no suitable image/link was found.
+# Prevents error/warning messages from appearing in the output if no suitable image/link was found.
 suppress_img_warnings = False
 
-# This will output all 7 different layout options below each other, easy for testing and picking your favorite.
+# Will output all 7 different layout options below each other, easy for testing and picking your favorite.
 # Note that this will include layouts with [table] and [spoiler] tags, so be careful if these aren't supported.
 all_layouts = False
 
-# Experimental feature that will convert the output BBCode directly to HTML. This can be used for rapid testing.
+# Converts the output BBCode directly to HTML. This can be used for rapid testing.
 # Requires bbcode module.
 output_html = False
 
 
-# Colors, fonts and titles. Alters the look of the output.
-cTHBG = '#003875'  # table header background
-cTHBD = '#0054B0'  # table header border
-cTHF = '#FFF'  # table header font color
-fTH = 'Verdana'  # table header font
-cTBBG = '#F4F4F4'  # table body background
-cTSEPBG = '#B0C4DE'  # table body separator background
-cTSEPF = ''  # table body separator font color
-cWARN = '#F80'  # warning message
-cERR = '#F00'  # error message
-mFileDetails = 'FILE DETAILS'
-mFullSizeSS = 'SCREENS (inline)'
-mFullSizeShow = 'SCREENS'
-mImageSets = 'IMAGE-SET DETAILS'
+# Display options: colors, fonts and titles. Alters the look of the output.
+dopt = {
+	'cTHBG': ['#003875', 'color', 'table header background'],
+	'cTHBD': ['#0054B0', 'color', 'table header border'],
+	'cTHF': ['#FFF', 'color', 'table header font color'],
+	'fTH': ['Verdana', 'font', 'table header font'],
+	'cTBBG': ['#F4F4F4', 'color', 'table body background'],
+	'cTSEPBG': ['#B0C4DE', 'color', 'table body separator background'],
+	'cTSEPF': ['', 'color', 'table body separator font color'],
+	'mFileDetails': ['FILE DETAILS', 'message', 'file-details table title'],
+	'mImageSets': ['IMAGE-SET DETAILS', 'message', 'image-set table title'],
+	'mFullSizeSS': ['SCREENS (inline)', 'message', '(when using _fullsize.txt images)'],
+	'mFullSizeShow': ['SCREENS', 'message', '(when using _fullsize.txt images)']
+}
 
 
 ##########################################################################
@@ -103,24 +91,55 @@ mImageSets = 'IMAGE-SET DETAILS'
 ##########################################################################
 
 
+def set_paths_and_run():
+	"""
+	Determines how the script will run and sets all the correct paths.
+	"""
+	global media_dir
+	global output_dir
+
+	# if we just want to debug image-host matching for development
+	if debug_imghost_slugs:
+		debug_imghost_matching()
+		sys.exit()
+
+	# set the correct output_dir
+	if not output_dir and not media_dir:
+		print('ERROR: no media directory specified!')
+		return
+	elif not output_dir:
+		# no output_dir specified, so we will output to the media_dir
+		output_dir = os.path.normpath(os.path.expanduser(media_dir))
+	else:
+		output_dir = os.path.normpath(os.path.expanduser(output_dir))
+
+	# set the correct media_dir
+	media_dir = os.path.normpath(os.path.expanduser(media_dir))
+	print('using media_dir  = ' + media_dir)
+	print('using output_dir = ' + output_dir)
+
+	parse_media_files()
+
+
 def parse_media_files():
 	"""
 	Uses the pymediainfo module to parse each file in a directory (recursively), and extract media information from
-	each video-clip (or image-set). It creates Clip objects and stores it in a clips list for later use.
-	Requires MediaInfo
+	each video-clip. It creates Clip objects and stores it in a clips list for later use. Also detects image-sets.
+	Requires MediaInfo and pymediainfo
 	"""
 	try:
 		from pymediainfo import MediaInfo
 	except ImportError:
 		print('\nERROR: Couldn\'t import MediaInfo module from pymediainfo!\n')
-		sys.exit()
+		return
 
 	clips = []
 	imagesets = []
 	ran_at_all = False  # canary - general
 	parsed_at_all = False  # canary - for when output_individual has cleared clips[] after sending to output
 
-	# ignore some common file-extensions often found alongside videos  # TODO unix is case-sensitive :(
+	# ignore some common file-extensions often found alongside videos
+	# TODO unix is case-sensitive :( and switch to include rather than exclude
 	skip_ext = ['.jpg', '.JPG', '.jpeg', 'JPEG', '.png', '.PNG', '.gif', '.GIF', '.psd', '.ai',
 				'.txt', '.nfo', '.NFO', '.doc', '.xml', '.csv', '.pdf', '.part',
 				'.flac', '.mp3', '.acc', '.wav', '.pls', '.m3u', '.torrent']
@@ -165,7 +184,7 @@ def parse_media_files():
 				print(' attempt file: {}'.format(file))
 
 				# create a separator with the relative directory, but only if it's the first valid file in the dir
-				if new_dir and media_dir_recursive and output_separators and not output_individual:
+				if new_dir and recursive and output_separators and not output_individual:
 					current_dir = os.path.relpath(root, media_dir)
 					if current_dir is not '.':
 						clips.append(current_dir)
@@ -196,7 +215,7 @@ def parse_media_files():
 					aprofile = track_aud.format_profile
 
 				# create Clip object for easier manipulation and passing around
-				clip = Clip('RAW', filepath, filename, filesize, length, vcodec, vcodec_alt,
+				clip = Clip(filepath, filename, filesize, length, vcodec, vcodec_alt,
 							vbitrate, vbitrate_alt, vwidth, vheight, vscantype, vframerate, vframerate_alt,
 							acodec, abitrate, asample, aprofile)
 				clips.append(metadata_cleanup(clip))
@@ -205,7 +224,7 @@ def parse_media_files():
 				print('ERROR parsing: {}  -  not a video file?'.format(file))
 
 		# break after top level if we don't want recursive parsing
-		if not media_dir_recursive:
+		if not recursive:
 			break
 		elif output_individual and (clips or imagesets):
 			# output each dir as a separate file, so we need to reset the clips after each successfully parsed dir
@@ -220,82 +239,6 @@ def parse_media_files():
 		print('ERROR: no valid media files found in: {}'.format(media_dir))
 	elif not output_individual:
 		format_final_output(clips + imagesets, media_dir)
-
-
-def parse_csv_files():
-	"""
-	Searches the working_dir for CSV files generated by MediaInfo. It extracts the valuable bits, creates a
-	Clip object for each row, and puts them in a clips dictionary which is used for generating output.
-	"""
-	import csv
-	files_tried = files_parsed = 0
-
-	for file in os.listdir('.'):  # path has already been set by os.chdir(working_dir)
-		if file.endswith(('.csv', '.CSV')):
-			print('\nSWITCH CSV: {}'.format(file))
-			files_tried += 1
-			clips = []
-
-			with open(file) as csvfile:
-				reader = csv.DictReader(csvfile, delimiter=';')
-				try:
-					reader = sorted(reader, key=operator.itemgetter('General CompleteName'))
-
-					# pray that these column names are correct for your CSV files
-					for row in reader:
-						# this hack makes it possible to parse Windows generated CSV files on Unix
-						filename_xos = os.path.normpath(row['General CompleteName'].replace('\\', '/'))
-
-						print(' attempt row: {}'.format(os.path.basename(filename_xos)))
-						filepath = os.path.dirname(filename_xos)
-						filename = os.path.basename(filename_xos)
-						filesize = row['General FileSize/String']
-						length = row['General Duration/String']
-
-						vcodec = row['Video 0 CodecID']
-						vcodec_alt = row['Video 0 Format']
-						vbitrate = row['Video 0 BitRate/String']
-						vbitrate_alt = row['General OverallBitRate/String']
-						vwidth = row['Video 0 Width/String']
-						vheight = row['Video 0 Height/String']
-						vscantype = row['Video 0 ScanType/String']
-						vframerate = row['Video 0 FrameRate/String']
-						vframerate_alt = row['Video 0 FrameRate_Nominal/String']
-
-						acodec = row['Audio 0 Format']
-						abitrate = row['Audio 0 BitRate/String']
-						asample = row['Audio 0 SamplingRate/String']
-						aprofile = row['Audio 0 Format_Profile']
-
-						# exclude every line that doesn't appear to be a video (only applies to CSV input)
-						if not length or (not vcodec and not vcodec_alt):
-							print(' skipped row: {}'.format(filename))
-							continue
-
-						# create Clip object for easier manipulation and passing around
-						clip = Clip('CSV', filepath, filename, filesize, length, vcodec, vcodec_alt,
-									vbitrate, vbitrate_alt, vwidth, vheight, vscantype, vframerate, vframerate_alt,
-									acodec, abitrate, asample, aprofile)
-						clips.append(metadata_cleanup(clip))
-						print(' parsed row : {}'.format(os.path.basename(row['General CompleteName'])))
-
-					files_parsed += 1
-
-				except KeyError:
-					csvfile.close()
-					print('ERROR parsing: {}  -  file most likely not generated using MediaInfo!'.format(file))
-					continue
-
-			format_final_output(clips, file)
-
-			csvfile.close()
-
-	if files_tried == 0:
-		print('ERROR: No CSV files found in: {}'.format(working_dir))
-	elif files_parsed == 0:
-		print('ERROR: Only incompatible CSV files found in: {}'.format(working_dir))
-	else:
-		print('CSV files tried: {}. CSV files parsed: {}'.format(files_tried, files_parsed))
 
 
 def parse_zip_files(root, file):  # TODO add support for rar, 7z, tar, etc.
@@ -350,8 +293,8 @@ def parse_zip_files(root, file):  # TODO add support for rar, 7z, tar, etc.
 
 def format_final_output(items, source):
 	"""
-	Takes the items (Clips or ImageSets) generated from either a single CSV file, or an live dir parsing session,
-	and determines the formatting to use (and call the corresponding function), finally writing to the output.
+	Takes the items (Clips and/or ImageSets) generated from a dir parsing session and determines the formatting to use,
+	combines them with image-host data, and finally writing to the output.
 	"""
 	# no items (clips/image-sets)? something is wrong
 	if not items:
@@ -359,32 +302,24 @@ def format_final_output(items, source):
 		return
 
 	# setup some file locations for input/output
-	if parse_media:
-		if output_individual:
-			# When creating an output file for each parsed directory, we don't want to have to create directories to
-			# the same depth as the source files (in order to keep the file structure). So for directories deeper than
-			# media_dir + 1, we concatenate the dir-names into a long string.
-			relpath = os.path.relpath(source, media_dir)
+	if output_individual:
+		# When creating an output file for each parsed directory, we don't want to have to create directories to
+		# the same depth as the source files (in order to keep the file structure). So for directories deeper than
+		# media_dir + 1, we concatenate the dir-names into a long string.
+		relpath = os.path.relpath(source, media_dir)
 
-			if relpath == '.':
-				working_file = os.path.join(working_dir, os.path.basename(source))
-			else:
-				working_file = os.path.join(working_dir, relpath.replace('\\', '__').replace('/', '__'))
+		if relpath == '.':
+			working_file = os.path.join(output_dir, os.path.basename(source))
 		else:
-			working_file = os.path.join(working_dir, os.path.basename(source))
-
-		file_output = working_file + '_output.txt'
-		file_output_html = working_file + '_output.html'
-		file_img_list = working_file + '.txt'
-		file_img_list_alt = working_file + '_alt.txt'
-		file_img_list_fullsize = working_file + '_fullsize.txt'
+			working_file = os.path.join(output_dir, relpath.replace('\\', '__').replace('/', '__'))
 	else:
-		# source is the CSV file-name
-		file_output = os.path.join(source[:-4] + '_output.txt')
-		file_output_html = os.path.join(source[:-4] + '_output.html')
-		file_img_list = os.path.join(source[:-4] + '.txt')
-		file_img_list_alt = os.path.join(source[:-4] + '_alt.txt')
-		file_img_list_fullsize = os.path.join(source[:-4] + '_fullsize.txt')
+		working_file = os.path.join(output_dir, os.path.basename(source))
+
+	file_output = working_file + '_output.txt'
+	file_output_html = working_file + '_output.html'
+	file_img_list = working_file + '.txt'
+	file_img_list_alt = working_file + '_alt.txt'
+	file_img_list_fullsize = working_file + '_fullsize.txt'
 
 	# create an output loop for generating all different layouts
 	if all_layouts and not layouts_busy:
@@ -392,7 +327,7 @@ def format_final_output(items, source):
 			open(file_output, 'w+').close()  # clear the current output file before starting the loop
 		except (IOError, OSError):
 			print('ERROR: Couldn\'t create output file: {}  (invalid directory?)'.format(file_output))
-			sys.exit()
+			return
 		generate_all_layouts(items, source)
 		return
 
@@ -406,12 +341,10 @@ def format_final_output(items, source):
 
 	# stop if this combination is active, it will produce a mess
 	if whole_filename_is_link and embed_images and not output_as_table:
-		invalid_combo = 'Using the parameters "whole_filename_is_link" and "embed_images" ' \
-						'and not "output_as_table" is the only invalid combination\n\n'
-		output.write(invalid_combo)
+		print('Using the parameters "whole_filename_is_link" and "embed_images" and not "output_as_table"'
+			' is the only invalid combination\n\n')
 		output.close()
-		print(invalid_combo)
-		sys.exit()  # the only situation where nothing good can come out of it
+		return
 
 	# try to create a list of all the full-sized images (if present) for fast single-click browsing
 	if not all_layouts:
@@ -423,7 +356,8 @@ def format_final_output(items, source):
 			if output_section_head and output_as_table:
 				output.write('[table=100%][tr][td={1}][bg={2}][align=center][font={4}][size=5][color={3}]'
 							'[b]{0}[/b][/color][/size][/font][/align][/bg][/td][/tr][/table]'
-							.format(mFullSizeSS, cTHBD, cTHBG, cTHF, fTH))
+							.format(dopt['mFullSizeSS'][0], dopt['cTHBD'][0],
+								dopt['cTHBG'][0], dopt['cTHF'][0], dopt['fTH'][0]))
 			fs_content = ''
 			first = True
 			for line in fs_list:
@@ -433,8 +367,8 @@ def format_final_output(items, source):
 				else:
 					fs_content += '\n' + line
 
-			output.write('[bg={2}]\n[align=center][size=2][spoiler={1}]'
-						'{0}[/spoiler][/size][/align]\n[/bg]\n\n'.format(fs_content, mFullSizeShow, cTBBG))
+			output.write('[bg={2}]\n[align=center][size=2][spoiler={1}]{0}[/spoiler][/size][/align]\n[/bg]\n\n'
+						.format(fs_content, dopt['mFullSizeShow'][0], dopt['cTBBG'][0]))
 
 		except (IOError, OSError):
 			print('NOTICE: No full-size image-list detected. Looked for: {}'.format(file_img_list_fullsize))
@@ -475,11 +409,12 @@ def format_final_output(items, source):
 	if output_section_head and output_as_table:
 		output.write('[table=100%][tr][td={1}][bg={2}][align=center][font={4}][size=5][color={3}]'
 					'[b]{0}[/b][/color][/size][/font][/align][/bg][/td][/tr][/table]'
-					.format(mFileDetails, cTHBD, cTHBG, cTHF, fTH))
+					.format(dopt['mFileDetails'][0], dopt['cTHBD'][0], dopt['cTHBG'][0],
+						dopt['cTHF'][0], dopt['fTH'][0]))
 	if output_as_table:
 		output.write('[size=0][align=center][table=100%,{bgc}]\n[tr][th][align=left]Filename + IMG[/align][/th]'
 					'[th]Size[/th][th]Length[/th][th]Codec[/th][th]Resolution[/th][th]Audio[/th]{alt}[/tr]\n'
-					.format(alt="[th]Alt.[/th]" if has_alts else '', bgc=cTBBG))
+					.format(alt="[th]Alt.[/th]" if has_alts else '', bgc=dopt['cTBBG'][0]))
 
 	# everything seems okay, now we can finally output something usefulz
 	tags = []
@@ -539,11 +474,12 @@ def format_final_output(items, source):
 		if output_section_head and output_as_table:
 			output.write('\n[table=100%][tr][td={1}][bg={2}][align=center][font={4}][size=5][color={3}]'
 						'[b]{0}[/b][/color][/size][/font][/align][/bg][/td][/tr][/table]'
-						.format(mImageSets, cTHBD, cTHBG, cTHF, fTH))
+						.format(dopt['mImageSets'][0], dopt['cTHBD'][0], dopt['cTHBG'][0],
+							dopt['cTHF'][0], dopt['fTH'][0]))
 		if output_as_table:
 			output.write('[size=0][align=center][table=100%,{bgc}]\n[tr][th][align=left]Filename + IMG[/align][/th]'
 						'[th]Images[/th][th]Resolution[/th][th]Size[/th][th]Unpacked[/th]{alt}[/tr]\n'
-						.format(alt="[th]Alt.[/th]" if has_alts else '', bgc=cTBBG))
+						.format(alt="[th]Alt.[/th]" if has_alts else '', bgc=dopt['cTBBG'][0]))
 
 		imagesets_parsed = 0
 		for imgset in imagesets:
@@ -574,7 +510,7 @@ def format_final_output(items, source):
 def format_row_output(item, img_match, img_match_alt, has_alts=False):
 	"""
 	Generate the row output based on the input item (a Clip or an ImageSet). Here we mainly do all operations that are
-	common to both 'table' and 'list' outputs, before calling the functions dealing with their differing sections.
+	common to both 'table' and 'list' outputs, before calling the functions dealing with their differences.
 	"""
 	if img_match and len(img_match) == 1:
 		# format the image link (and thumbnail) into correct BBCode for display
@@ -582,7 +518,7 @@ def format_row_output(item, img_match, img_match_alt, has_alts=False):
 		if embed_images:
 			if img_match['bburl']:
 				img_code = '[url={1}][img]{0}[/img][/url]'.format(img_match['bbimg'], img_match['bburl'])
-			elif support_bbcode_thumb:
+			elif output_bbcode_thumb:
 				img_code = '[thumb]{0}[/thumb]'.format(img_match['bbimg'])
 			else:
 				img_code = '[img]{0}[/img]'.format(img_match['bbimg'])
@@ -730,7 +666,8 @@ def format_row_separator(dir_name, has_alts):
 		# most BBCode engines don't support col-span  # TODO nb support is common?
 		return '[tr={2}][td=nb][align=left][size=3][color={3}][b]{0}[/b][/color][/size][/align][/td]' \
 			'{1}{1}{1}{1}{1}{alt}[/tr]\n' \
-			.format(dir_name, '[td=nb][/td]', cTSEPBG, cTSEPF, alt="[td=nb][/td]" if has_alts else '')
+			.format(dir_name, '[td=nb][/td]', dopt['cTSEPBG'][0], dopt['cTSEPF'][0],
+				alt="[td=nb][/td]" if has_alts else '')
 	else:
 		# just a boring row with the directory name
 		return '[size=2]- [b][i]{}[/i][/b][/size]\n'.format(dir_name)
@@ -850,6 +787,7 @@ def format_html_output(file_output, file_output_html):
 	parser = bbcode.Parser(newline='<br />\n')
 	parser.add_simple_formatter('th', '<th>%(value)s</th>')
 	parser.add_simple_formatter('img', '<img src="%(value)s">', replace_links=False)
+	parser.add_simple_formatter('thumb', '<img class="thumb" src="%(value)s">', replace_links=False)
 	parser.add_formatter('table', render_table, transform_newlines=False)
 	parser.add_formatter('tr', render_tr)
 	parser.add_formatter('td', render_td)
@@ -867,6 +805,7 @@ def format_html_output(file_output, file_output_html):
 		'table.noborder, table.noborder td {border: none}\n' \
 		'th, td {padding: 3px 5px;}\n' \
 		'.bq {display: none;}\n' \
+		'.thumb {max-width: 400px;}\n' \
 		'a.sp:focus ~ .bq, .bq:focus {display: block;}\n'
 	html_file.write('<!DOCTYPE html>\n<html>\n<head>\n<meta charset="UTF-8">\n<title>Test</title>\n'
 					'<style type="text/css">\n{1}\n</style>\n</head>\n<body>\n{0}\n</body>\n</html>\n'
@@ -882,140 +821,105 @@ def format_html_output(file_output, file_output_html):
 def metadata_cleanup(clip):
 	"""
 	Performs various steps in order to check the integrity of the data, as well as cleaning up ugly inputs.
-	All this is very specific to MediaInfo, and might even break with versions other than MediaInfo 0.7.92. YMMV
+	All this is very specific to MediaInfo, and might even break with versions other than MediaInfo 0.7.93. YMMV
 	"""
-	# shared adjustments for both RAW and CSV
-	if clip.generator in {'RAW', 'CSV'}:
+	# some missing meta-data cleanup
+	if clip.vbitrate_alt and (not clip.vbitrate or len(str(clip.vbitrate)) <= 5):
+		setattr(clip, 'vbitrate', clip.vbitrate_alt)
 
-		# some general cleanups
-		if clip.vbitrate_alt and (not clip.vbitrate or len(str(clip.vbitrate)) <= 5):
-			setattr(clip, 'vbitrate', clip.vbitrate_alt)
+	if clip.vframerate:
+		setattr(clip, 'vframerate', clip.vframerate[:5])
 
-		if clip.vframerate:
-			setattr(clip, 'vframerate', clip.vframerate[:5])
+	if clip.vframerate_alt:
+		setattr(clip, 'vframerate_alt', clip.vframerate_alt[:5])
+		# fix for some WMV/MKV files
+		if not clip.vframerate or (clip.vframerate and len(str(clip.vframerate)) < 2):
+			setattr(clip, 'vframerate', clip.vframerate_alt)
 
-		if clip.vframerate_alt:
-			setattr(clip, 'vframerate_alt', clip.vframerate_alt[:5])
-			# fix for some WMV/MKV files
-			if not clip.vframerate or (clip.vframerate and len(str(clip.vframerate)) < 2):
-				setattr(clip, 'vframerate', clip.vframerate_alt)
+	if clip.vscantype:
+		setattr(clip, 'vscantype', clip.vscantype[:1].lower())
+	else:
+		setattr(clip, 'vscantype', '')
 
-		if clip.vscantype:
-			setattr(clip, 'vscantype', clip.vscantype[:1].lower())
-		else:
-			setattr(clip, 'vscantype', '')
+	# vcodec cleanup
+	if clip.vcodec:
+		vcodec = clip.vcodec.upper()
 
-		# vcodec cleanup
-		if clip.vcodec:
-			vcodec = clip.vcodec.upper()
-
-			if 'AVC' in vcodec:
-				vcodec = 'AVC'
-			elif 'H264' in vcodec:
-				vcodec = 'AVC'
-			elif 'HEVC' in vcodec:
-				vcodec = 'HEVC'
-			elif 'XVID' in vcodec:
-				vcodec = 'XviD'
-			elif 'DIVX' in vcodec:
-				vcodec = 'DivX'
-			elif 'DX50' in vcodec:
-				vcodec = 'DivX5'
-			elif 'DIV3' in vcodec:
-				vcodec = 'DivX3'
-			elif 'MP43' in vcodec:
-				vcodec = 'MP4v3'
-			elif 'MP42' in vcodec:
-				vcodec = 'MP4v2'
-			elif '263' in vcodec:
-				vcodec = 'H.263'
-			elif len(vcodec) <= 2 and clip.vcodec_alt:
-				vcodec = clip.vcodec_alt
-		elif clip.vcodec_alt:
-			vcodec = clip.vcodec_alt
-		else:
-			vcodec = '?'
-
-		# final vcodec cleanup
-		if 'Visual' in vcodec:
+		if 'AVC' in vcodec:
+			vcodec = 'AVC'
+		elif 'H264' in vcodec:
+			vcodec = 'AVC'
+		elif 'HEVC' in vcodec:
+			vcodec = 'HEVC'
+		elif 'XVID' in vcodec:
+			vcodec = 'XviD'
+		elif 'DIVX' in vcodec:
+			vcodec = 'DivX'
+		elif 'DX50' in vcodec:
+			vcodec = 'DivX5'
+		elif 'DIV3' in vcodec:
+			vcodec = 'DivX3'
+		elif 'MP43' in vcodec:
+			vcodec = 'MP4v3'
+		elif 'MP42' in vcodec:
 			vcodec = 'MP4v2'
-		elif 'MPEG' in vcodec:
-			vcodec = 'MPEG'
-		setattr(clip, 'vcodec', vcodec)
+		elif '263' in vcodec:
+			vcodec = 'H.263'
+		elif len(vcodec) <= 2 and clip.vcodec_alt:
+			vcodec = clip.vcodec_alt
+	elif clip.vcodec_alt:
+		vcodec = clip.vcodec_alt
+	else:
+		vcodec = '?'
 
-		# acodec cleanup
-		if clip.acodec and 'MPEG' in clip.acodec and clip.aprofile:
-			# catches MP2 whereas codec_id_hint does not
-			setattr(clip, 'acodec', 'MP' + clip.aprofile[-1:])
-		elif clip.acodec and 'AC-3' in clip.acodec:
-			setattr(clip, 'acodec', 'AC3')
-		if not clip.abitrate:
-			setattr(clip, 'abitrate', '?')
+	# final vcodec cleanup
+	if 'Visual' in vcodec:
+		vcodec = 'MP4v2'
+	elif 'MPEG' in vcodec:
+		vcodec = 'MPEG'
+	setattr(clip, 'vcodec', vcodec)
 
-	if clip.generator == 'RAW':
+	# acodec cleanup
+	if clip.acodec and 'MPEG' in clip.acodec and clip.aprofile:
+		# catches MP2 whereas codec_id_hint does not
+		setattr(clip, 'acodec', 'MP' + clip.aprofile[-1:])
+	elif clip.acodec and 'AC-3' in clip.acodec:
+		setattr(clip, 'acodec', 'AC3')
+	if not clip.abitrate:
+		setattr(clip, 'abitrate', '?')
 
-		# format video length
-		if clip.length:
-			length = clip.length / 1000
-			seconds = int(length % 60)
-			length /= 60
-			minutes = int(length % 60)
-			length /= 60
-			hours = int(length % 24)
-			setattr(clip, 'length', '{0:02d}:{1:02d}:{2:02d}'.format(hours, minutes, seconds))
+	# format video length
+	if clip.length:
+		length = clip.length / 1000
+		seconds = int(length % 60)
+		length /= 60
+		minutes = int(length % 60)
+		length /= 60
+		hours = int(length % 24)
+		setattr(clip, 'length', '{0:02d}:{1:02d}:{2:02d}'.format(hours, minutes, seconds))
 
-		# format file size
-		setattr(clip, 'filesize', readable_number(clip.filesize))
+	# format file size
+	setattr(clip, 'filesize', readable_number(clip.filesize))
 
-		# format video bit-rate
-		setattr(clip, 'vbitrate', readable_number(clip.vbitrate, 'b/s', 1000.0, 10000.0, 1))
+	# format video bit-rate
+	setattr(clip, 'vbitrate', readable_number(clip.vbitrate, 'b/s', 1000.0, 10000.0, 1))
 
-		# format audio bit-rate
+	# format audio bit-rate
+	try:
+		setattr(clip, 'abitrate', readable_number(clip.abitrate, 'b/s', 1000.0, 1000.0, 0))
+	except TypeError:
+		pass
+
+	# format audio sample-rate
+	if clip.asample:
 		try:
-			setattr(clip, 'abitrate', readable_number(clip.abitrate, 'b/s', 1000.0, 1000.0, 0))
+			setattr(clip, 'asample', readable_number(clip.asample, 'Hz', 1000.0, 1000.0, 1))
 		except TypeError:
-			pass
-
-		# format audio sample-rate
-		if clip.asample:
-			try:
-				setattr(clip, 'asample', readable_number(clip.asample, 'Hz', 1000.0, 1000.0, 1))
-			except TypeError:
-				if '/' in clip.asample:
-					clean_asample = int(clip.asample.split('/', 1)[0].strip())
-					setattr(clip, 'asample', readable_number(clean_asample, 'Hz', 1000.0, 1000.0, 1))
-				else:
-					pass
-
-	elif clip.generator == 'CSV':
-
-		# format video length, not ideal due to default MediaInfo CSV output
-		time_segments = re.findall('(\d{1,2}\s?\w{1,5})', clip.length)
-
-		if time_segments:
-			time_units = {'h': 0, 'm': 0, 's': 0, 'ms': 0}
-
-			for segment in time_segments:
-				if 'ms' in segment:
-					time_units['ms'] = segment
-				elif 'h' in segment:
-					time_units['h'] = segment
-				elif 'm' in segment:
-					time_units['m'] = segment
-				elif 's' in segment:
-					time_units['s'] = segment
-
-			for unit, value in time_units.items():
-				time_units[unit] = re.sub('\D', '', str(value)).zfill(2)
-
-			setattr(clip, 'length', '{}:{}:{}'.format(time_units['h'], time_units['m'], time_units['s']))
-
-		# some other cleanups
-		setattr(clip, 'vwidth', re.sub('\D', '', clip.vwidth))
-		setattr(clip, 'vheight', re.sub('\D', '', clip.vheight))
-
-		# remove annoying spaces between numbers: 1 500 kb/s > 1500 kb/s
-		setattr(clip, 'vbitrate', re.sub(r'(\d)\s+(\d)', r'\1\2', clip.vbitrate))
+			if '/' in clip.asample:
+				clean_asample = int(clip.asample.split('/', 1)[0].strip())
+				setattr(clip, 'asample', readable_number(clean_asample, 'Hz', 1000.0, 1000.0, 1))
+			else:
+				pass
 
 	return clip
 
@@ -1164,17 +1068,16 @@ def get_screenshot_hash(filename, filepath, algorithm, strlen):
 		# commonly named sub-dirs of the same path as the actual video file
 		search_dirs.append(os.path.join(filepath, ss_subdir))
 
-	if parse_media and media_dir_recursive:
-		# path of video relative to master path
-		relpath = os.path.relpath(filepath, media_dir)
-		if relpath is not '.':
-			for ss_subdir in common_ss_subdirs:
-				# for when screenshots are located at the top level dir, but have the same dir structure as the clips
-				search_dirs.append(os.path.join(media_dir, ss_subdir, relpath))
-
+	# path of video relative to master path
+	relpath = os.path.relpath(filepath, media_dir)
+	if relpath is not '.':
 		for ss_subdir in common_ss_subdirs:
-			# commonly named sub-dirs of the top level media_dir (when recursive clip searching is used)
-			search_dirs.append(os.path.join(media_dir, ss_subdir))
+			# for when screenshots are located at the top level dir, but have the same dir structure as the clips
+			search_dirs.append(os.path.join(media_dir, ss_subdir, relpath))
+
+	for ss_subdir in common_ss_subdirs:
+		# commonly named sub-dirs of the top level media_dir (when recursive clip searching is used)
+		search_dirs.append(os.path.join(media_dir, ss_subdir))
 
 	# perform the actual search by traversing all the directories listed, and test all file-name variants in those dirs
 	ss_found = None
@@ -1303,12 +1206,12 @@ def debug_imghost_matching(ifile='./testing/input.txt', hdir='./testing/image-ho
 		test_names = open(ifile)
 	except (IOError, OSError):
 		print('{1}ERROR: No input file found for testing! Looked for:{2} {0}'.format(ifile, c['FAIL'], c['ENDC']))
-		sys.exit()
+		return
 
 	test_names = test_names.read().splitlines()
 	if not test_names:
 		print('{1}ERROR: No file-names found for testing in:{2} {0}'.format(ifile, c['FAIL'], c['ENDC']))
-		sys.exit()
+		return
 
 	# try each image-host output file
 	for hfile in os.listdir(hdir):
@@ -1417,46 +1320,6 @@ def generate_tags(tags, filename):
 	return tags
 
 
-class Clip(object):
-	def __init__(self, generator, filepath, filename, filesize, length, vcodec, vcodec_alt, vbitrate, vbitrate_alt,
-				vwidth, vheight, vscantype, vframerate, vframerate_alt,
-				acodec, abitrate, asample, aprofile):
-
-		self.generator = generator
-
-		self.filepath = filepath
-		self.filename = filename
-		self.filesize = filesize
-		self.length = length
-
-		self.vcodec = vcodec
-		self.vcodec_alt = vcodec_alt
-		self.vbitrate = vbitrate
-		self.vbitrate_alt = vbitrate_alt
-		self.vwidth = vwidth
-		self.vheight = vheight
-		self.vscantype = vscantype
-		self.vframerate = vframerate
-		self.vframerate_alt = vframerate_alt
-
-		self.acodec = acodec
-		self.abitrate = abitrate
-		self.asample = asample
-		self.aprofile = aprofile
-
-
-class ImageSet(object):
-	def __init__(self, filepath, filename, filesize, orig_size, img_count, resolution):
-
-		self.filepath = filepath
-		self.filename = filename
-		self.filesize = filesize
-
-		self.orig_size = orig_size
-		self.img_count = img_count
-		self.resolution = resolution
-
-
 def generate_all_layouts(items, source):
 	"""
 	Hijacks the output function and runs it multiple times with differing settings to generate all possible layouts.
@@ -1510,20 +1373,403 @@ def generate_all_layouts(items, source):
 	layouts_busy = False
 
 
+class Clip(object):
+	def __init__(self, filepath, filename, filesize, length, vcodec, vcodec_alt, vbitrate, vbitrate_alt,
+				vwidth, vheight, vscantype, vframerate, vframerate_alt,
+				acodec, abitrate, asample, aprofile):
+
+		self.filepath = filepath
+		self.filename = filename
+		self.filesize = filesize
+		self.length = length
+
+		self.vcodec = vcodec
+		self.vcodec_alt = vcodec_alt
+		self.vbitrate = vbitrate
+		self.vbitrate_alt = vbitrate_alt
+		self.vwidth = vwidth
+		self.vheight = vheight
+		self.vscantype = vscantype
+		self.vframerate = vframerate
+		self.vframerate_alt = vframerate_alt
+
+		self.acodec = acodec
+		self.abitrate = abitrate
+		self.asample = asample
+		self.aprofile = aprofile
+
+
+class ImageSet(object):
+	def __init__(self, filepath, filename, filesize, orig_size, img_count, resolution):
+
+		self.filepath = filepath
+		self.filename = filename
+		self.filesize = filesize
+
+		self.orig_size = orig_size
+		self.img_count = img_count
+		self.resolution = resolution
+
+
+class GUI:
+
+	# redirect stdout (print) to a widget
+	class StdoutRedirector(object):
+		def __init__(self, widget):
+			self.widget = widget
+
+		def write(self, line):
+			self.widget.insert(END, line)
+			self.widget.see(END)
+
+		def flush(self):
+			pass
+
+	def __init__(self, root):
+		root.title('MediaToBBCode.py')
+		root.minsize(width=450, height=500)
+		root.iconbitmap(default=resource_path('icon.ico'))
+
+		# input options
+		self.media_dir = StringVar()
+		self.media_dir.set(media_dir)
+		self.output_dir = StringVar()
+		self.output_dir.set(output_dir)
+		self.recursive = BooleanVar()
+		self.recursive.set(recursive)
+		self.parse_zip = BooleanVar()
+		self.parse_zip.set(parse_zip)
+
+		frame1 = ttk.LabelFrame(root, text='Input options', padding=6)
+		frame1.pack(fill=X, expand=False, padx=6, pady=6)
+		frame1.columnconfigure(1, weight=1)
+
+		ttk.Label(frame1, text='media dir').grid(row=0, column=0, sticky='E')
+		ttk.Label(frame1, text='output dir').grid(row=1, column=0, sticky='E')
+
+		entry_mdir = ttk.Entry(frame1, textvariable=self.media_dir)
+		entry_mdir.grid(row=0, column=1, sticky='W, E')
+		entry_odir = ttk.Entry(frame1, textvariable=self.output_dir)
+		entry_odir.grid(row=1, column=1, sticky='W, E')
+
+		browse_mdir = ttk.Button(frame1, text="Browse", command=self.select_mdir)
+		browse_mdir.grid(row=0, column=2)
+		browse_odir = ttk.Button(frame1, text="Browse", command=self.select_odir)
+		browse_odir.grid(row=1, column=2)
+
+		self.cbox_recursive = ttk.Checkbutton(
+			frame1, text='Recursive', variable=self.recursive, command=self.state_change)
+		self.cbox_recursive.grid(row=0, column=3, sticky='W')
+
+		self.cbox_zip = ttk.Checkbutton(
+			frame1, text='Parse ZIP', variable=self.parse_zip, command=self.state_change)
+		self.cbox_zip.grid(row=1, column=3, sticky='W')
+
+		# notebook to create tabs
+		notebook = ttk.Notebook(root)
+
+		# output options
+		self.output_as_table = BooleanVar()
+		self.output_as_table.set(output_as_table)
+		self.output_individual = BooleanVar()
+		self.output_individual.set(output_individual)
+		self.output_separators = BooleanVar()
+		self.output_separators.set(output_separators)
+		self.output_section_head = BooleanVar()
+		self.output_section_head.set(output_section_head)
+		self.embed_images = BooleanVar()
+		self.embed_images.set(embed_images)
+		self.output_bbcode_thumb = BooleanVar()
+		self.output_bbcode_thumb.set(output_bbcode_thumb)
+		self.whole_filename_is_link = BooleanVar()
+		self.whole_filename_is_link.set(whole_filename_is_link)
+		self.suppress_img_warnings = BooleanVar()
+		self.suppress_img_warnings.set(suppress_img_warnings)
+		self.all_layouts = BooleanVar()
+		self.all_layouts.set(all_layouts)
+		self.output_html = BooleanVar()
+		self.output_html.set(output_html)
+
+		frame2 = ttk.Frame(notebook, padding=6)
+		frame2.pack(fill=X, expand=False)
+
+		label_table = 'Output as table using [table] tag.'
+		self.cbox_table = ttk.Checkbutton(
+			frame2, text=label_table, variable=self.output_as_table, command=self.state_change)
+		self.cbox_table.grid(row=0, column=0, sticky='W')
+
+		label_individual = 'Output each directory as an individual file (when using "recursive").'
+		self.cbox_individual = ttk.Checkbutton(
+			frame2, text=label_individual, variable=self.output_individual, command=self.state_change)
+		self.cbox_individual.grid(row=1, column=0, sticky='W')
+
+		label_separators = 'Output separators for each parsed directory (when using "recursive").'
+		self.cbox_separators = ttk.Checkbutton(
+			frame2, text=label_separators, variable=self.output_separators, command=self.state_change)
+		self.cbox_separators.grid(row=2, column=0, sticky='W')
+
+		label_sectionhead = 'Output section-head above the table.'
+		self.cbox_sectionhead = ttk.Checkbutton(
+			frame2, text=label_sectionhead, variable=self.output_section_head, command=self.state_change)
+		self.cbox_sectionhead.grid(row=3, column=0, sticky='W')
+
+		label_embedimg = 'Embed images using the [spoiler] tag (otherwise output a simple link).'
+		self.cbox_embedimg = ttk.Checkbutton(
+			frame2, text=label_embedimg, variable=self.embed_images, command=self.state_change)
+		self.cbox_embedimg.grid(row=4, column=0, sticky='W')
+
+		label_thumb = 'Use the [thumb] tag when embedding images.'
+		self.cbox_thumb = ttk.Checkbutton(
+			frame2, text=label_thumb, variable=self.output_bbcode_thumb, command=self.state_change)
+		self.cbox_thumb.grid(row=5, column=0, sticky='W')
+
+		label_wholelink = 'Make the whole file-name a [spoiler] (or url-link) to the image/url.'
+		self.cbox_wholelink = ttk.Checkbutton(
+			frame2, text=label_wholelink, variable=self.whole_filename_is_link, command=self.state_change)
+		self.cbox_wholelink.grid(row=6, column=0, sticky='W')
+
+		label_suppress = 'Suppress error and warning messages for missing images.'
+		self.cbox_suppress = ttk.Checkbutton(
+			frame2, text=label_suppress, variable=self.suppress_img_warnings, command=self.state_change)
+		self.cbox_suppress.grid(row=7, column=0, sticky='W')
+
+		label_alllayouts = 'Output all layout combinations in a single file (for easy testing).'
+		self.cbox_alllayouts = ttk.Checkbutton(
+			frame2, text=label_alllayouts, variable=self.all_layouts, command=self.state_change)
+		self.cbox_alllayouts.grid(row=8, column=0, sticky='W')
+
+		label_html = 'Output to HTML. The output BBCode will be converted (for easy testing).'
+		self.cbox_html = ttk.Checkbutton(
+			frame2, text=label_html, variable=self.output_html, command=self.state_change)
+		self.cbox_html.grid(row=9, column=0, sticky='W')
+
+		# styling options
+		frame2b = ttk.Frame(notebook, padding=6)
+		frame2b.pack(fill=X, expand=False)
+
+		self.cTHBG = StringVar()
+		self.cTHBG.set(dopt['cTHBG'][0])
+		self.cTHBD = StringVar()
+		self.cTHBD.set(dopt['cTHBD'][0])
+		self.cTHF = StringVar()
+		self.cTHF.set(dopt['cTHF'][0])
+		self.fTH = StringVar()
+		self.fTH.set(dopt['fTH'][0])
+		self.cTBBG = StringVar()
+		self.cTBBG.set(dopt['cTBBG'][0])
+		self.cTSEPBG = StringVar()
+		self.cTSEPBG.set(dopt['cTSEPBG'][0])
+		self.cTSEPF = StringVar()
+		self.cTSEPF.set(dopt['cTSEPF'][0])
+		self.mFileDetails = StringVar()
+		self.mFileDetails.set(dopt['mFileDetails'][0])
+		self.mImageSets = StringVar()
+		self.mImageSets.set(dopt['mImageSets'][0])
+		self.mFullSizeSS = StringVar()
+		self.mFullSizeSS.set(dopt['mFullSizeSS'][0])
+		self.mFullSizeShow = StringVar()
+		self.mFullSizeShow.set(dopt['mFullSizeShow'][0])
+
+		self.e_cTHBG = ttk.Entry(frame2b, textvariable=self.cTHBG)
+		self.e_cTHBG.grid(row=0, column=1)
+		ttk.Label(frame2b, text=dopt['cTHBG'][2]).grid(row=0, column=2, sticky='W')
+
+		self.e_cTHBD = ttk.Entry(frame2b, textvariable=self.cTHBD)
+		self.e_cTHBD.grid(row=1, column=1)
+		ttk.Label(frame2b, text=dopt['cTHBD'][2]).grid(row=1, column=2, sticky='W')
+
+		self.e_cTHF = ttk.Entry(frame2b, textvariable=self.cTHF)
+		self.e_cTHF.grid(row=2, column=1)
+		ttk.Label(frame2b, text=dopt['cTHF'][2]).grid(row=2, column=2, sticky='W')
+
+		self.e_fTH = ttk.Entry(frame2b, textvariable=self.fTH)
+		self.e_fTH.grid(row=3, column=1)
+		ttk.Label(frame2b, text=dopt['fTH'][2]).grid(row=3, column=2, sticky='W')
+
+		self.e_cTBBG = ttk.Entry(frame2b, textvariable=self.cTBBG)
+		self.e_cTBBG.grid(row=4, column=1)
+		ttk.Label(frame2b, text=dopt['cTBBG'][2]).grid(row=4, column=2, sticky='W')
+
+		self.e_cTSEPBG = ttk.Entry(frame2b, textvariable=self.cTSEPBG)
+		self.e_cTSEPBG.grid(row=5, column=1)
+		ttk.Label(frame2b, text=dopt['cTSEPBG'][2]).grid(row=5, column=2, sticky='W')
+
+		self.e_cTSEPF = ttk.Entry(frame2b, textvariable=self.cTSEPF)
+		self.e_cTSEPF.grid(row=6, column=1)
+		ttk.Label(frame2b, text=dopt['cTSEPF'][2]).grid(row=6, column=2, sticky='W')
+
+		self.e_mFileDetails = ttk.Entry(frame2b, textvariable=self.mFileDetails)
+		self.e_mFileDetails.grid(row=7, column=1)
+		ttk.Label(frame2b, text=dopt['mFileDetails'][2]).grid(row=7, column=2, sticky='W')
+
+		self.e_mImageSets = ttk.Entry(frame2b, textvariable=self.mImageSets)
+		self.e_mImageSets.grid(row=8, column=1)
+		ttk.Label(frame2b, text=dopt['mImageSets'][2]).grid(row=8, column=2, sticky='W')
+
+		self.e_mFullSizeSS = ttk.Entry(frame2b, textvariable=self.mFullSizeSS)
+		self.e_mFullSizeSS.grid(row=9, column=1)
+		ttk.Label(frame2b, text=dopt['mFullSizeSS'][2]).grid(row=9, column=2, sticky='W')
+
+		self.e_mFullSizeShow = ttk.Entry(frame2b, textvariable=self.mFullSizeShow)
+		self.e_mFullSizeShow.grid(row=10, column=1)
+		ttk.Label(frame2b, text=dopt['mFullSizeShow'][2]).grid(row=10, column=2, sticky='W')
+
+		# TODO add color options using a loop? Because this is just silly
+		self.b_cTHBG = Button(frame2b, bg=self.cTHBG.get(), width=1, height=1, command=lambda: self.color_picker(self.cTHBG))
+		# self.b_cTHBG.grid(row=0, column=0)
+
+		# fill the notebook
+		notebook.add(frame2, text='Output options')
+		notebook.add(frame2b, text='Styling options')
+		notebook.pack(fill=X, expand=False, padx=6, pady=6)
+
+		# master buttons
+		frame3 = ttk.Frame(root, padding=6)
+		frame3.pack(expand=False)
+
+		self.run_button = ttk.Button(frame3, text="RUN", command=self.set_options)
+		self.run_button.pack()
+
+		# log window
+		frame4 = ttk.Frame(root)
+		frame4.pack(fill=BOTH, expand=True, padx=5, pady=5)
+		frame4.columnconfigure(0, weight=1)
+		frame4.rowconfigure(0, weight=1)
+
+		log_font = font.nametofont('TkFixedFont').configure(size=8)
+		self.log_text = scrolledtext.ScrolledText(frame4, height=9, font=log_font, state=DISABLED)
+		self.log_text.grid(row=0, column=0, sticky=(N, S, E, W))
+
+		sys.stdout = GUI.StdoutRedirector(self.log_text)
+
+		self.state_change()
+
+	def select_mdir(self):
+		selected = filedialog.askdirectory(title='Select media directory', initialdir=self.media_dir)
+		self.media_dir.set(selected)
+
+	def select_odir(self):
+		selected = filedialog.askdirectory(title='Select output directory', initialdir=self.output_dir)
+		self.output_dir.set(selected)
+
+	def state_change(self):
+		if self.recursive.get():
+			self.cbox_individual.config(state=NORMAL)
+			self.cbox_separators.config(state=NORMAL)
+		else:
+			self.cbox_individual.config(state=DISABLED)
+			self.cbox_separators.config(state=DISABLED)
+
+		if self.output_individual.get() or not self.recursive.get():
+			self.cbox_separators.config(state=DISABLED)
+		else:
+			self.cbox_separators.config(state=NORMAL)
+
+		if self.output_as_table.get():
+			self.cbox_sectionhead.config(state=NORMAL)
+		else:
+			self.cbox_sectionhead.config(state=DISABLED)
+
+		if self.embed_images.get():
+			self.cbox_thumb.config(state=NORMAL)
+		else:
+			self.cbox_thumb.config(state=DISABLED)
+
+	def color_picker(self, var):
+		self.log_text.config(state=NORMAL)  # todo temp
+		color = colorchooser.askcolor(initialcolor=var.get())[1]
+		var.set(color)
+		print(color)
+
+	def set_options(self):
+		global media_dir
+		global output_dir
+		global recursive
+		global parse_zip
+
+		global output_as_table
+		global output_individual
+		global output_separators
+		global output_section_head
+		global embed_images
+		global output_bbcode_thumb
+		global whole_filename_is_link
+		global suppress_img_warnings
+		global all_layouts
+		global output_html
+
+		global dopt
+
+		media_dir = self.media_dir.get()
+		output_dir = self.output_dir.get()
+		recursive = self.recursive.get()
+		parse_zip = self.parse_zip.get()
+
+		output_as_table = self.output_as_table.get()
+		output_individual = self.output_individual.get()
+		output_separators = self.output_separators.get()
+		output_section_head = self.output_section_head.get()
+		embed_images = self.embed_images.get()
+		output_bbcode_thumb = self.output_bbcode_thumb.get()
+		whole_filename_is_link = self.whole_filename_is_link.get()
+		suppress_img_warnings = self.suppress_img_warnings.get()
+		all_layouts = self.all_layouts.get()
+		output_html = self.output_html.get()
+
+		dopt['cTHBG'][0] = self.cTHBG.get()
+		dopt['cTHBD'][0] = self.cTHBD.get()
+		dopt['cTHF'][0] = self.cTHF.get()
+		dopt['fTH'][0] = self.fTH.get()
+		dopt['cTBBG'][0] = self.cTBBG.get()
+		dopt['cTSEPBG'][0] = self.cTSEPBG.get()
+		dopt['cTSEPF'][0] = self.cTSEPF.get()
+		dopt['mFileDetails'][0] = self.mFileDetails.get()
+		dopt['mImageSets'][0] = self.mImageSets.get()
+		dopt['mFullSizeSS'][0] = self.mFullSizeSS.get()
+		dopt['mFullSizeShow'][0] = self.mFullSizeShow.get()
+
+		# create a new tread for the actual processing, so the GUI won't freeze
+		threading.Thread(target=self.run).start()
+
+	def run(self):
+		self.log_text.config(state=NORMAL)
+		self.run_button.config(state=DISABLED)
+		self.log_text.delete(1.0, END)
+
+		set_paths_and_run()
+
+		self.log_text.config(state=DISABLED)
+		self.run_button.config(state=NORMAL)
+
+
 layouts_busy = False  # don't touch!
 layouts_last = False  # used to only run format_html_output once
 debug_imghost_slugs = False  # for debugging
+cERR = '#F00'
+cWARN = '#F80'
 author = 'Output script by [url=https://github.com/PayBas/MediaToBBCode]PayBas[/url].'  # TODO
+
+
+def resource_path(relative_path):
+	"""
+	Get absolute path to resource, works for dev and for PyInstaller 3.2
+	"""
+	try:
+		# PyInstaller creates a temp folder and stores path in _MEIPASS
+		base_path = sys._MEIPASS
+	except AttributeError:
+		base_path = os.path.abspath(".")
+
+	return os.path.join(base_path, relative_path)
 
 
 def main(argv):
 	"""
-	Process command-line inputs
+	Process command-line inputs or load GUI
 	"""
-	global working_dir
-	global parse_media
 	global media_dir
-	global media_dir_recursive
+	global output_dir
+	global recursive
 	global parse_zip
 
 	global output_as_table
@@ -1531,8 +1777,8 @@ def main(argv):
 	global output_separators
 	global output_section_head
 	global embed_images
+	global output_bbcode_thumb
 	global whole_filename_is_link
-	global support_bbcode_thumb
 	global suppress_img_warnings
 	global all_layouts
 	global output_html
@@ -1540,21 +1786,26 @@ def main(argv):
 	global debug_imghost_slugs
 
 	h = 'mediatobbcode.py\n' \
-		'- parse all CSV files in default dir: ./files/\n\n' \
-		'mediatobbcode.py -d <working dir>\n' \
-		'- parse all CSV files in working dir -d\n\n' \
+		'- use GUI to set options\n\n' \
 		'mediatobbcode.py -m <media dir>\n' \
 		'- parse all media files in dir -m and output to -m\n\n' \
-		'mediatobbcode.py -d <working dir> -m <media dir>\n' \
-		'- parse all media files in dir -m and output to -d\n\n' \
-		'mediatobbcode.py -d <working dir> -m <media dir> -r\n' \
-		'- parse all media files in -m recursively and output to -d\n\n' \
+		'mediatobbcode.py -m <media dir> -o <output dir>\n' \
+		'- parse all media files in dir -m and output to -o\n\n' \
+		'mediatobbcode.py -m <media dir> -r -o <output dir>\n' \
+		'- parse all media files in -m recursively and output to -o\n\n' \
 		'For a full list of command-line options, see the online documentation.'
 
 	try:
-		opts, args = getopt.getopt(argv, 'hd:m:rzlifbutnsawx', ['help', 'dir=', 'mediadir=', 'recursive', 'zip'
-															'list', 'individual', 'flat', 'bare', 'url', 'tinylink',
-															'nothumb', 'suppress', 'all', 'webhtml', 'xdebug'])
+		opts, args = getopt.getopt(argv, 'hm:o:rzlifbuntsawx',
+			['help', 'mediadir=', 'outputdir=', 'recursive', 'zip' 'list', 'individual', 'flat',
+			'bare', 'url', 'nothumb', 'tinylink', 'suppress', 'all', 'webhtml', 'xdebug'])
+		if not opts:
+			# create GUI to set variables
+			root = Tk()
+			GUI(root)
+			root.mainloop()
+			sys.exit()
+
 	except getopt.GetoptError:
 		print(h)
 		sys.exit(2)
@@ -1564,13 +1815,12 @@ def main(argv):
 			print(h)
 			sys.exit()
 
-		elif opt in ('-d', '--dir'):
-			working_dir = arg
 		elif opt in ('-m', '--mediadir'):
-			parse_media = True
 			media_dir = arg
+		elif opt in ('-o', '--outputdir'):
+			output_dir = arg
 		elif opt in ('-r', '--recursive'):
-			media_dir_recursive = True
+			recursive = True
 		elif opt in ('-z', '--zip'):
 			parse_zip = True
 
@@ -1584,10 +1834,10 @@ def main(argv):
 			output_section_head = False
 		elif opt in ('-u', '--url'):
 			embed_images = False
+		elif opt in ('-n', '--nothumb'):
+			output_bbcode_thumb = False
 		elif opt in ('-t', '--tinylink'):
 			whole_filename_is_link = False
-		elif opt in ('-n', '--nothumb'):
-			support_bbcode_thumb = False
 		elif opt in ('-s', '--suppress'):
 			suppress_img_warnings = True
 		elif opt in ('-a', '--all'):
@@ -1597,37 +1847,8 @@ def main(argv):
 		elif opt in ('-x', '--xdebug'):
 			debug_imghost_slugs = True
 
-	# if we just want to debug image-host matching for development
-	if debug_imghost_slugs:
-		debug_imghost_matching()
-		sys.exit()
-
-	# set the correct working_dir
-	if not working_dir:
-		print('ERROR: no working directory specified!')
-		sys.exit()
-	elif parse_media and ('./files' in working_dir):
-		# no working_dir specified from command-line
-		working_dir = os.path.normpath(os.path.expanduser(media_dir))
-	else:
-		working_dir = os.path.normpath(os.path.expanduser(working_dir))
-
-	# set the correct media_dir
-	if parse_media and not media_dir:
-		print('ERROR: no media directory specified!')
-		sys.exit()
-	elif parse_media and media_dir:
-		media_dir = os.path.normpath(os.path.expanduser(media_dir))
-
-	if parse_media:
-		parse_media_files()
-	else:
-		try:
-			os.chdir(working_dir)
-		except OSError:
-			print('ERROR: directory "{}" doesn\'t appear to exist!'.format(working_dir))
-			sys.exit()
-		parse_csv_files()
+	# initialize the script using the command-line arguments
+	set_paths_and_run()
 
 
 # hi there :)

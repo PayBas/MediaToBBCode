@@ -1,10 +1,13 @@
 # encoding: utf-8
 
 import getopt
-import hashlib
 import os
-import threading
 import unicodedata
+import webbrowser
+from collections import OrderedDict
+from hashlib import md5
+from ruamel import yaml
+from threading import Thread
 from tkinter import *
 from tkinter import ttk, filedialog, font, colorchooser, scrolledtext
 from urllib.parse import urlparse
@@ -14,109 +17,154 @@ from urllib.parse import urlparse
 # DON'T TOUCH ANYTHING ABOVE THIS LINE UNLESS YOU KNOW WHAT YOU'RE DOING #
 ##########################################################################
 
+"""
+@ media_dir
+The directory to use when looking for media files to process.
 
-# The directory to use when looking for media files to process.
-media_dir = './videos'
+@ output_dir
+The output/working directory, where image-host data should be located, and _output.txt files are written.
 
-# The output/working directory, where image-host data should be located, and _output.txt files are written.
-output_dir = ''
+@ recursive
+Will enable recursive searching for files. Meaning it will include all sub-directories of "media_dir".
 
-# Will enable recursive searching for files. Meaning it will include all sub-directories of "media_dir".
-recursive = False
-
-# Enables parsing of compressed (ZIP) archives for image-sets. All image-sets will be output below other parsed media.
-# Requires Pillow
-parse_zip = False
-
-
-# Generate table output. If not, a simpler (ugly) flat list will be generated.
-# Requires support for [table] tags by the BBCode engine used by your website.
-output_as_table = True
-
-# Generate a separate output file for each directory successfully traversed recursively.
-# Only applies if "recursive = True".
-output_individual = False
-
-# Generate separators (with the directory name) when switching directories in recursive mode.
-# Only applies if "recursive = True" and "output_individual = False"
-output_separators = True
-
-# Generate a nice heading above the table/list.
-# Requires support for [table] tags by the BBCode engine used by your website.
-output_section_head = True
-
-# Embed the image/thumbnails in the output. Otherwise a link to the image will be embedded.
-# I strongly advise using small/medium thumbnail images if you want to embed them _and_ your website doesn't support
-# the [thumb] BBCode tag, or they will break the table layout.
-# Requires support for [spoiler] tags by the BBCode engine used by your website.
-embed_images = True
-
-# Determines if embedded images will use the [thumb] BBCode tag, or [img].
-output_bbcode_thumb = True
-
-# Instead of having a small link next to the file-name, to the full-sized image, the whole title will be a link.
-# When combined with "embed_images", this will make the whole file-name a spoiler tag.
-whole_filename_is_link = True
-
-# Prevents error/warning messages from appearing in the output if no suitable image/link was found.
-suppress_img_warnings = False
-
-# Will output all 7 different layout options below each other, easy for testing and picking your favorite.
-# Note that this will include layouts with [table] and [spoiler] tags, so be careful if these aren't supported.
-all_layouts = False
-
-# Converts the output BBCode directly to HTML. This can be used for rapid testing.
-# Requires bbcode module.
-output_html = False
+@ parse_zip
+Enables parsing of compressed (ZIP) archives for image-sets. All image-sets will be output below other parsed media.
+Requires Pillow.
 
 
-# Display options: colors, fonts and titles. Alters the look of the output.
-dopt = {
-	'cTHBG': ['#003875', 'color', 'table header background'],
-	'cTHBD': ['#0054B0', 'color', 'table header border'],
-	'cTHF': ['#FFF', 'color', 'table header font color'],
-	'fTH': ['Verdana', 'font', 'table header font'],
-	'cTBBG': ['#F4F4F4', 'color', 'table body background'],
-	'cTSEPBG': ['#B0C4DE', 'color', 'table body separator background'],
-	'cTSEPF': ['', 'color', 'table body separator font color'],
-	'mFileDetails': ['FILE DETAILS', 'message', 'file-details table title'],
-	'mImageSets': ['IMAGE-SET DETAILS', 'message', 'image-set table title'],
-	'mFullSizeSS': ['SCREENS (inline)', 'message', '(when using _fullsize.txt images)'],
-	'mFullSizeShow': ['SCREENS', 'message', '(when using _fullsize.txt images)']
-}
+@ output_as_table
+Generate table output. If not, a simpler (ugly) flat list will be generated.
+Requires support for [table] tags by the BBCode engine used by your website.
+
+@ output_individual
+Generate a separate output file for each directory successfully traversed recursively.
+Only applies if "recursive = True".
+
+@ output_separators
+Generate separators (with the directory name) when switching directories in recursive mode.
+Only applies if "recursive = True" and "output_individual = False"
+
+@ output_section_head
+Generate a nice heading above the table/list.
+Requires support for [table] tags by the BBCode engine used by your website.
+
+@ embed_images
+Embed the image/thumbnails in the output. Otherwise a link to the image will be embedded.
+I strongly advise using small/medium thumbnail images if you want to embed them _and_ your website doesn't support
+the [thumb] BBCode tag, or they will break the table layout.
+Requires support for [spoiler] tags by the BBCode engine used by your website.
+
+@ output_bbcode_thumb
+Determines if embedded images will use the [thumb] BBCode tag, or [img].
+
+@ whole_filename_is_link
+Instead of having a small link next to the file-name, to the full-sized image, the whole title will be a link.
+When combined with "embed_images", this will make the whole file-name a spoiler tag.
+
+@ suppress_img_warnings
+Prevents error/warning messages from appearing in the output if no suitable image/link was found.
+
+@ all_layouts
+Will output all 7 different layout options below each other, easy for testing and picking your favorite.
+Note that this will include layouts with [table] and [spoiler] tags, so be careful if these aren't supported.
+
+@ output_html
+Converts the output BBCode directly to HTML. This can be used for rapid testing.
+Requires bbcode module.
+"""
+
+# Input options
+iopts = OrderedDict([
+	('media_dir', ['./videos', 'string', 'Media dir']),
+	('output_dir', ['', 'string', 'Output dir']),
+	('recursive', [False, 'bool', 'Recursive']),
+	('parse_zip', [False, 'bool', 'Parse ZIP']),
+])
+
+# Output options
+oopts = OrderedDict([
+	('output_as_table', [True, 'bool', 'Output as table using [table] tag.']),
+	('output_individual', [False, 'bool', 'Output each directory as an individual file (when using "recursive").']),
+	('output_separators', [True, 'bool', 'Output separators for each parsed directory (when using "recursive").']),
+	('output_section_head', [True, 'bool', 'Output section-head above the table.']),
+	('embed_images', [True, 'bool', 'Embed images using the [spoiler] tag (otherwise output a simple link).']),
+	('output_bbcode_thumb', [True, 'bool', 'Use the [thumb] tag when embedding images.']),
+	('whole_filename_is_link', [True, 'bool', 'Make the whole file-name a [spoiler] (or url-link) to the image/url.']),
+	('suppress_img_warnings', [False, 'bool', 'Suppress error and warning messages for missing images.']),
+	('all_layouts', [False, 'bool', 'Output all layout combinations in a single file (for easy testing).']),
+	('output_html', [False, 'bool', 'Output to HTML. The output BBCode will be converted (for easy testing).'])
+])
+
+# Display options
+dopts = OrderedDict([
+	('cTHBG', ['#003875', 'color', 'table header background']),
+	('cTHBD', ['#0054B0', 'color', 'table header border']),
+	('cTHF', ['#FFF', 'color', 'table header font color']),
+	('fTH', ['Verdana', 'font', 'table header font']),
+	('cTBBG', ['#F4F4F4', 'color', 'table body background']),
+	('cTSEPBG', ['#B0C4DE', 'color', 'table body separator background']),
+	('cTSEPF', ['', 'color', 'table body separator font color']),
+	('tFileDetails', ['FILE DETAILS', 'text', 'file-details table title']),
+	('tImageSets', ['IMAGE-SET DETAILS', 'text', 'image-set table title']),
+	('tFullSizeSS', ['SCREENS (inline)', 'text', '(when using _fullsize.txt images)']),
+	('tFullSizeShow', ['SCREENS', 'text', '(when using _fullsize.txt images)'])
+])
 
 
 ##########################################################################
 # DON'T TOUCH ANYTHING BELOW THIS LINE UNLESS YOU KNOW WHAT YOU'RE DOING #
 ##########################################################################
 
+opts = dict()  # contains all options (with only code values), populated fresh each run
 
-def set_paths_and_run():
+layouts_busy = False  # don't touch!
+layouts_last = False  # used to only run format_html_output once
+debug_imghost_slugs = False  # for debugging
+cERR = '#F00'  # output color for errors
+cWARN = '#F80'  # output color for warnings
+
+author = 'PayBas'
+author_url = 'https://github.com/PayBas'
+script = 'MediaToBBCode.py'
+script_url = 'https://github.com/PayBas/MediaToBBCode'
+version = '1.1.1'
+compile_date = '08-03-2017'
+credits_bbcode = 'Output script by [url={}]PayBas[/url].'.format(script_url)
+
+
+def set_vars_and_run():
 	"""
 	Determines how the script will run and sets all the correct paths.
 	"""
-	global media_dir
-	global output_dir
-
 	# if we just want to debug image-host matching for development
 	if debug_imghost_slugs:
 		debug_imghost_matching()
 		sys.exit()
 
+	global opts
+
+	# put all the variables (as set by command-line or GUI) in one big dictionary
+	for opt, value in iopts.items():
+		opts[opt] = value[0]
+	for opt, value in oopts.items():
+		opts[opt] = value[0]
+	for opt, value in dopts.items():
+		opts[opt] = value[0]
+
 	# set the correct output_dir
-	if not output_dir and not media_dir:
+	if not opts['output_dir'] and not opts['media_dir']:
 		print('ERROR: no media directory specified!')
 		return
-	elif not output_dir:
+	elif not opts['output_dir']:
 		# no output_dir specified, so we will output to the media_dir
-		output_dir = os.path.normpath(os.path.expanduser(media_dir))
+		opts['output_dir'] = os.path.normpath(os.path.expanduser(opts['media_dir']))
 	else:
-		output_dir = os.path.normpath(os.path.expanduser(output_dir))
+		opts['output_dir'] = os.path.normpath(os.path.expanduser(opts['output_dir']))
 
 	# set the correct media_dir
-	media_dir = os.path.normpath(os.path.expanduser(media_dir))
-	print('using media_dir  = ' + media_dir)
-	print('using output_dir = ' + output_dir)
+	opts['media_dir'] = os.path.normpath(os.path.expanduser(opts['media_dir']))
+	print('using media_dir  = ' + opts['media_dir'])
+	print('using output_dir = ' + opts['output_dir'])
 
 	parse_media_files()
 
@@ -144,13 +192,13 @@ def parse_media_files():
 				'.txt', '.nfo', '.NFO', '.doc', '.xml', '.csv', '.pdf', '.part',
 				'.flac', '.mp3', '.acc', '.wav', '.pls', '.m3u', '.torrent']
 	zip_ext = ['.zip', '.ZIP', '.7z', '.7Z', '.gz', '.GZ', '.tar', '.TAR', '.rar', '.RAR']
-	if parse_zip:
+	if opts['parse_zip']:
 		zip_ext = tuple(zip_ext)
 	else:
 		skip_ext.extend(zip_ext)
 	skip_ext = tuple(skip_ext)
 
-	for root, dirs, files in os.walk(media_dir):
+	for root, dirs, files in os.walk(opts['media_dir']):
 		print('\nSWITCH dir: {}'.format(root))
 		new_dir = True
 		ran_at_all = True
@@ -161,7 +209,7 @@ def parse_media_files():
 				print(' skipped file: {}'.format(file))
 				continue
 			# if parse_zip is enabled, check ZIP files to see if it's an image-set
-			elif parse_zip and file.endswith(zip_ext):
+			elif opts['parse_zip'] and file.endswith(zip_ext):
 				imgset = parse_zip_files(root, file)
 				if imgset:
 					imagesets.append(imgset)
@@ -184,8 +232,8 @@ def parse_media_files():
 				print(' attempt file: {}'.format(file))
 
 				# create a separator with the relative directory, but only if it's the first valid file in the dir
-				if new_dir and recursive and output_separators and not output_individual:
-					current_dir = os.path.relpath(root, media_dir)
+				if new_dir and opts['recursive'] and opts['output_separators'] and not opts['output_individual']:
+					current_dir = os.path.relpath(root, opts['media_dir'])
 					if current_dir is not '.':
 						clips.append(current_dir)
 					new_dir = False
@@ -224,9 +272,9 @@ def parse_media_files():
 				print('ERROR parsing: {}  -  not a video file?'.format(file))
 
 		# break after top level if we don't want recursive parsing
-		if not recursive:
+		if not opts['recursive']:
 			break
-		elif output_individual and (clips or imagesets):
+		elif opts['output_individual'] and (clips or imagesets):
 			# output each dir as a separate file, so we need to reset the clips after each successfully parsed dir
 			parsed_at_all = True
 			format_final_output(clips + imagesets, root)
@@ -234,11 +282,11 @@ def parse_media_files():
 			imagesets = []
 
 	if not ran_at_all:
-		print('ERROR: invalid directory for: {}'.format(media_dir))
+		print('ERROR: invalid directory for: {}'.format(opts['media_dir']))
 	elif not clips and not imagesets and not parsed_at_all:
-		print('ERROR: no valid media files found in: {}'.format(media_dir))
-	elif not output_individual:
-		format_final_output(clips + imagesets, media_dir)
+		print('ERROR: no valid media files found in: {}'.format(opts['media_dir']))
+	elif not opts['output_individual']:
+		format_final_output(clips + imagesets, opts['media_dir'])
 
 
 def parse_zip_files(root, file):  # TODO add support for rar, 7z, tar, etc.
@@ -302,18 +350,18 @@ def format_final_output(items, source):
 		return
 
 	# setup some file locations for input/output
-	if output_individual:
+	if opts['output_individual']:
 		# When creating an output file for each parsed directory, we don't want to have to create directories to
 		# the same depth as the source files (in order to keep the file structure). So for directories deeper than
 		# media_dir + 1, we concatenate the dir-names into a long string.
-		relpath = os.path.relpath(source, media_dir)
+		relpath = os.path.relpath(source, opts['media_dir'])
 
 		if relpath == '.':
-			working_file = os.path.join(output_dir, os.path.basename(source))
+			working_file = os.path.join(opts['output_dir'], os.path.basename(source))
 		else:
-			working_file = os.path.join(output_dir, relpath.replace('\\', '__').replace('/', '__'))
+			working_file = os.path.join(opts['output_dir'], relpath.replace('\\', '__').replace('/', '__'))
 	else:
-		working_file = os.path.join(output_dir, os.path.basename(source))
+		working_file = os.path.join(opts['output_dir'], os.path.basename(source))
 
 	file_output = working_file + '_output.txt'
 	file_output_html = working_file + '_output.html'
@@ -322,7 +370,7 @@ def format_final_output(items, source):
 	file_img_list_fullsize = working_file + '_fullsize.txt'
 
 	# create an output loop for generating all different layouts
-	if all_layouts and not layouts_busy:
+	if opts['all_layouts'] and not layouts_busy:
 		try:
 			open(file_output, 'w+').close()  # clear the current output file before starting the loop
 		except (IOError, OSError):
@@ -332,7 +380,7 @@ def format_final_output(items, source):
 		return
 
 	# append the output of every cycle rather than truncating the entire output file
-	write_mode = 'a+' if all_layouts else 'w+'
+	write_mode = 'a+' if opts['all_layouts'] else 'w+'
 	try:
 		output = open(file_output, write_mode, encoding='utf-8')
 	except (IOError, OSError):
@@ -340,24 +388,23 @@ def format_final_output(items, source):
 		return
 
 	# stop if this combination is active, it will produce a mess
-	if whole_filename_is_link and embed_images and not output_as_table:
+	if opts['whole_filename_is_link'] and opts['embed_images'] and not opts['output_as_table']:
 		print('Using the parameters "whole_filename_is_link" and "embed_images" and not "output_as_table"'
 			' is the only invalid combination\n\n')
 		output.close()
 		return
 
 	# try to create a list of all the full-sized images (if present) for fast single-click browsing
-	if not all_layouts:
+	if not opts['all_layouts']:
 		try:
 			fs_file = open(file_img_list_fullsize)
 			fs_list = fs_file.read().split()
 
 			# set up the table header before the actual content
-			if output_section_head and output_as_table:
+			if opts['output_section_head'] and opts['output_as_table']:
 				output.write('[table=100%][tr][td={1}][bg={2}][align=center][font={4}][size=5][color={3}]'
 							'[b]{0}[/b][/color][/size][/font][/align][/bg][/td][/tr][/table]'
-							.format(dopt['mFullSizeSS'][0], dopt['cTHBD'][0],
-								dopt['cTHBG'][0], dopt['cTHF'][0], dopt['fTH'][0]))
+							.format(opts['tFullSizeSS'], opts['cTHBD'], opts['cTHBG'], opts['cTHF'], opts['fTH']))
 			fs_content = ''
 			first = True
 			for line in fs_list:
@@ -368,7 +415,7 @@ def format_final_output(items, source):
 					fs_content += '\n' + line
 
 			output.write('[bg={2}]\n[align=center][size=2][spoiler={1}]{0}[/spoiler][/size][/align]\n[/bg]\n\n'
-						.format(fs_content, dopt['mFullSizeShow'][0], dopt['cTBBG'][0]))
+						.format(fs_content, opts['tFullSizeShow'], opts['cTBBG']))
 
 		except (IOError, OSError):
 			print('NOTICE: No full-size image-list detected. Looked for: {}'.format(file_img_list_fullsize))
@@ -394,27 +441,26 @@ def format_final_output(items, source):
 		has_alts = True
 
 	# output the corresponding command-line options if we are doing an all_layouts loop, for easy reference
-	if all_layouts and layouts_busy:
+	if opts['all_layouts'] and layouts_busy:
 		options = ''
-		if not output_as_table:
+		if not opts['output_as_table']:
 			options += '-l '
-		if not embed_images:
+		if not opts['embed_images']:
 			options += '-u '
-		if not whole_filename_is_link:
+		if not opts['whole_filename_is_link']:
 			options += '-t '
 
 		output.write('\n\nCommand-line options: [size=3][b]{}[/b][/size]\n\n'.format(options))
 
 	# if we choose to output the data as a table, we need to set up the table header before the data first row
-	if output_section_head and output_as_table:
+	if opts['output_section_head'] and opts['output_as_table']:
 		output.write('[table=100%][tr][td={1}][bg={2}][align=center][font={4}][size=5][color={3}]'
 					'[b]{0}[/b][/color][/size][/font][/align][/bg][/td][/tr][/table]'
-					.format(dopt['mFileDetails'][0], dopt['cTHBD'][0], dopt['cTHBG'][0],
-						dopt['cTHF'][0], dopt['fTH'][0]))
-	if output_as_table:
+					.format(opts['tFileDetails'], opts['cTHBD'], opts['cTHBG'], opts['cTHF'], opts['fTH']))
+	if opts['output_as_table']:
 		output.write('[size=0][align=center][table=100%,{bgc}]\n[tr][th][align=left]Filename + IMG[/align][/th]'
 					'[th]Size[/th][th]Length[/th][th]Codec[/th][th]Resolution[/th][th]Audio[/th]{alt}[/tr]\n'
-					.format(alt="[th]Alt.[/th]" if has_alts else '', bgc=dopt['cTBBG'][0]))
+					.format(alt="[th]Alt.[/th]" if has_alts else '', bgc=opts['cTBBG']))
 
 	# everything seems okay, now we can finally output something usefulz
 	tags = []
@@ -463,23 +509,22 @@ def format_final_output(items, source):
 			items_parsed += 1
 
 	# if we choose to output the data as a table, we need to set up the table footer after the last data row
-	if output_as_table:
+	if opts['output_as_table']:
 		output.write('[/table][/align][/size]')
 
 	output.write('[size=0][align=right]File information for {} items generated by MediaInfo. {}[/align][/size]'
-				.format(items_parsed, author))
+				.format(items_parsed, credits_bbcode))
 
 	# process the image-sets we split-off earlier, and create a separate table/list for them at the bottom
 	if imagesets:
-		if output_section_head and output_as_table:
+		if opts['output_section_head'] and opts['output_as_table']:
 			output.write('\n[table=100%][tr][td={1}][bg={2}][align=center][font={4}][size=5][color={3}]'
 						'[b]{0}[/b][/color][/size][/font][/align][/bg][/td][/tr][/table]'
-						.format(dopt['mImageSets'][0], dopt['cTHBD'][0], dopt['cTHBG'][0],
-							dopt['cTHF'][0], dopt['fTH'][0]))
-		if output_as_table:
+						.format(opts['tImageSets'], opts['cTHBD'], opts['cTHBG'], opts['cTHF'], opts['fTH']))
+		if opts['output_as_table']:
 			output.write('[size=0][align=center][table=100%,{bgc}]\n[tr][th][align=left]Filename + IMG[/align][/th]'
 						'[th]Images[/th][th]Resolution[/th][th]Size[/th][th]Unpacked[/th]{alt}[/tr]\n'
-						.format(alt="[th]Alt.[/th]" if has_alts else '', bgc=dopt['cTBBG'][0]))
+						.format(alt="[th]Alt.[/th]" if has_alts else '', bgc=opts['cTBBG']))
 
 		imagesets_parsed = 0
 		for imgset in imagesets:
@@ -487,11 +532,11 @@ def format_final_output(items, source):
 			output.write(format_row_output(imgset['item'], imgset['img_match'], imgset['img_match_alt'], has_alts))
 			imagesets_parsed += 1
 
-		if output_as_table:
+		if opts['output_as_table']:
 			output.write('[/table][/align][/size]')
 
 		output.write('[size=0][align=right]File information for {} archives generated. {}[/align][/size]'
-					.format(imagesets_parsed, author))
+					.format(imagesets_parsed, credits_bbcode))
 
 	# append the generated performer tags (if successful) to the output
 	if tags:
@@ -503,7 +548,7 @@ def format_final_output(items, source):
 	print('Output written to: {}'.format(file_output))
 
 	# convert the final output to HTML code for quicker testing
-	if (output_html and not all_layouts) or (output_html and all_layouts and layouts_last):
+	if (opts['output_html'] and not opts['all_layouts']) or (opts['output_html'] and opts['all_layouts'] and layouts_last):
 		format_html_output(file_output, file_output_html)
 
 
@@ -515,10 +560,10 @@ def format_row_output(item, img_match, img_match_alt, has_alts=False):
 	if img_match and len(img_match) == 1:
 		# format the image link (and thumbnail) into correct BBCode for display
 		img_match = img_match[0]
-		if embed_images:
+		if opts['embed_images']:
 			if img_match['bburl']:
 				img_code = '[url={1}][img]{0}[/img][/url]'.format(img_match['bbimg'], img_match['bburl'])
-			elif output_bbcode_thumb:
+			elif opts['output_bbcode_thumb']:
 				img_code = '[thumb]{0}[/thumb]'.format(img_match['bbimg'])
 			else:
 				img_code = '[img]{0}[/img]'.format(img_match['bbimg'])
@@ -549,7 +594,7 @@ def format_row_output(item, img_match, img_match_alt, has_alts=False):
 		img_code_alt = False
 		img_msg_alt = ''
 
-	if output_as_table:
+	if opts['output_as_table']:
 		# output BBCode as a table row
 		output = format_row_table(item, img_code, img_msg, img_code_alt, img_msg_alt, has_alts)
 	else:
@@ -565,17 +610,17 @@ def format_row_table(item, img_code, img_msg, img_code_alt, img_msg_alt, has_alt
 	"""
 	if img_code:
 		# make the entire file-name a spoiler link
-		if embed_images and whole_filename_is_link:
+		if opts['embed_images'] and opts['whole_filename_is_link']:
 			bbsafe_filename = item.filename.replace('[', '{').replace(']', '}')
 			col1 = '[spoiler={0}]{1}{2}[/spoiler]'.format(bbsafe_filename, img_code, img_msg_alt)
 		# inline spoiler BBCode pushes trailing text to the bottom, so if we embed images, they have to be at the end
-		elif embed_images:
+		elif opts['embed_images']:
 			col1 = '{0}     [spoiler=IMG]{1}{2}[/spoiler]'.format(item.filename, img_code, img_msg_alt)
-		elif whole_filename_is_link:
+		elif opts['whole_filename_is_link']:
 			col1 = '[b][url={1}]{0}[/url][/b]'.format(item.filename, img_code)
 		else:
 			col1 = '[b][b][url={1}]IMG[/url][/b]  {0}[/b]'.format(item.filename, img_code)
-	elif suppress_img_warnings:
+	elif opts['suppress_img_warnings']:
 		col1 = item.filename
 	else:
 		col1 = '{0}     {1}'.format(item.filename, img_msg)
@@ -619,9 +664,9 @@ def format_row_list(item, img_code, img_msg, img_code_alt, img_msg_alt):
 	filename = item.filename
 
 	if img_code:
-		if embed_images:
+		if opts['embed_images']:
 			img_code = ' [spoiler=:]{0}{1}[/spoiler]'.format(img_code, img_msg_alt)
-		elif whole_filename_is_link:
+		elif opts['whole_filename_is_link']:
 			filename = '[url={1}]{0}[/url]'.format(filename, img_code)
 			if img_code_alt:
 				filename += '  ([url={}]alt.[/url])'.format(img_code_alt)
@@ -633,7 +678,7 @@ def format_row_list(item, img_code, img_msg, img_code_alt, img_msg_alt):
 			else:
 				filename = '[b][url={1}]IMG[/url][/b]  {0}'.format(filename, img_code)
 			img_code = ''
-	elif suppress_img_warnings:
+	elif opts['suppress_img_warnings']:
 		img_code = ''
 	else:
 		img_code = '     {0}'.format(img_msg)
@@ -662,12 +707,11 @@ def format_row_separator(dir_name, has_alts):
 	"""
 	Formats a separator row with the current parsing directory. For prettier organizing of rows.
 	"""
-	if output_as_table:
+	if opts['output_as_table']:
 		# most BBCode engines don't support col-span  # TODO nb support is common?
 		return '[tr={2}][td=nb][align=left][size=3][color={3}][b]{0}[/b][/color][/size][/align][/td]' \
 			'{1}{1}{1}{1}{1}{alt}[/tr]\n' \
-			.format(dir_name, '[td=nb][/td]', dopt['cTSEPBG'][0], dopt['cTSEPF'][0],
-				alt="[td=nb][/td]" if has_alts else '')
+			.format(dir_name, '[td=nb][/td]', opts['cTSEPBG'], opts['cTSEPF'], alt="[td=nb][/td]" if has_alts else '')
 	else:
 		# just a boring row with the directory name
 		return '[size=2]- [b][i]{}[/i][/b][/size]\n'.format(dir_name)
@@ -678,8 +722,6 @@ def format_html_output(file_output, file_output_html):
 	Converts the BBCode output directly to HTML. This can be useful for rapid testing purposes.
 	requires bbcode module ( http://bbcode.readthedocs.io/ )
 	"""
-	import webbrowser
-
 	try:
 		import bbcode
 	except ImportError:
@@ -706,8 +748,8 @@ def format_html_output(file_output, file_output_html):
 		width = background = border = ''
 
 		if 'table' in options:
-			opts = options['table'].split(',')
-			for opt in opts:
+			args = options['table'].split(',')
+			for opt in args:
 				if '#' in opt:
 					background = 'background: {};'.format(opt)
 				elif '%' in opt or 'px' in opt:
@@ -722,8 +764,8 @@ def format_html_output(file_output, file_output_html):
 		background = ''
 
 		if 'tr' in options:
-			opts = options['tr'].split(',')
-			for opt in opts:
+			args = options['tr'].split(',')
+			for opt in args:
 				if '#' in opt:
 					background = 'background: {};'.format(opt)
 
@@ -734,8 +776,8 @@ def format_html_output(file_output, file_output_html):
 		background = border = ''
 
 		if 'td' in options:
-			opts = options['td'].split(',')
-			for opt in opts:
+			args = options['td'].split(',')
+			for opt in args:
 				if '#' in opt:
 					background = 'background: {};'.format(opt)
 				if 'nb' in opt:
@@ -770,10 +812,10 @@ def format_html_output(file_output, file_output_html):
 
 	def render_font(tag_name, value, options, parent, context):
 		if 'font' in options:
-			font = options['font']
+			font_value = options['font']
 		else:
-			font = 'inherit'
-		return '<span style="font-family: {};">{}</span>'.format(font, value)
+			font_value = 'inherit'
+		return '<span style="font-family: {};">{}</span>'.format(font_value, value)
 
 	# hide/show is handled with CSS
 	def render_spoiler(tag_name, value, options, parent, context):
@@ -1069,15 +1111,15 @@ def get_screenshot_hash(filename, filepath, algorithm, strlen):
 		search_dirs.append(os.path.join(filepath, ss_subdir))
 
 	# path of video relative to master path
-	relpath = os.path.relpath(filepath, media_dir)
+	relpath = os.path.relpath(filepath, opts['media_dir'])
 	if relpath is not '.':
 		for ss_subdir in common_ss_subdirs:
 			# for when screenshots are located at the top level dir, but have the same dir structure as the clips
-			search_dirs.append(os.path.join(media_dir, ss_subdir, relpath))
+			search_dirs.append(os.path.join(opts['media_dir'], ss_subdir, relpath))
 
 	for ss_subdir in common_ss_subdirs:
 		# commonly named sub-dirs of the top level media_dir (when recursive clip searching is used)
-		search_dirs.append(os.path.join(media_dir, ss_subdir))
+		search_dirs.append(os.path.join(opts['media_dir'], ss_subdir))
 
 	# perform the actual search by traversing all the directories listed, and test all file-name variants in those dirs
 	ss_found = None
@@ -1100,7 +1142,7 @@ def get_screenshot_hash(filename, filepath, algorithm, strlen):
 			return None
 		if 'md5' in algorithm:
 			print('calculating MD5 hash for: {}'.format(ss_found))
-			return hashlib.md5(img).hexdigest()[:strlen]
+			return md5(img).hexdigest()[:strlen]
 		else:
 			return None
 	else:
@@ -1324,53 +1366,94 @@ def generate_all_layouts(items, source):
 	"""
 	Hijacks the output function and runs it multiple times with differing settings to generate all possible layouts.
 	"""
-	global layouts_busy
-	global layouts_last
+	global opts, layouts_busy, layouts_last
 	layouts_busy = True
 	layouts_last = False
 
-	global output_as_table
-	global embed_images
-	global whole_filename_is_link
-
-	output_as_table = True
-	embed_images = True
-	whole_filename_is_link = True
+	opts['output_as_table'] = True
+	opts['embed_images'] = True
+	opts['whole_filename_is_link'] = True
 	format_final_output(items, source)
 
-	output_as_table = True
-	embed_images = False
-	whole_filename_is_link = True
+	opts['output_as_table'] = True
+	opts['embed_images'] = False
+	opts['whole_filename_is_link'] = True
 	format_final_output(items, source)
 
-	output_as_table = True
-	embed_images = True
-	whole_filename_is_link = False
+	opts['output_as_table'] = True
+	opts['embed_images'] = True
+	opts['whole_filename_is_link'] = False
 	format_final_output(items, source)
 
-	output_as_table = True
-	embed_images = False
-	whole_filename_is_link = False
+	opts['output_as_table'] = True
+	opts['embed_images'] = False
+	opts['whole_filename_is_link'] = False
 	format_final_output(items, source)
 
-	output_as_table = False
-	embed_images = False
-	whole_filename_is_link = True
+	opts['output_as_table'] = False
+	opts['embed_images'] = False
+	opts['whole_filename_is_link'] = True
 	format_final_output(items, source)
 
-	output_as_table = False
-	embed_images = True
-	whole_filename_is_link = False
+	opts['output_as_table'] = False
+	opts['embed_images'] = True
+	opts['whole_filename_is_link'] = False
 	format_final_output(items, source)
 
 	layouts_last = True
 
-	output_as_table = False
-	embed_images = False
-	whole_filename_is_link = False
+	opts['output_as_table'] = False
+	opts['embed_images'] = False
+	opts['whole_filename_is_link'] = False
 	format_final_output(items, source)
 
 	layouts_busy = False
+
+
+def save_config(file):
+	print('Saving config to: {}'.format(file))
+
+	with open(file, 'w', encoding='utf-8') as stream:
+		stream.write('# Config file for MediaToBBCode.py\n')
+		combined_opts = OrderedDict([('iopts', iopts), ('oopts', oopts), ('dopts', dopts)])
+		yaml.dump(combined_opts, stream, default_flow_style=False)
+
+
+def load_config(file):
+	global iopts, oopts, dopts
+	print('Loading config from: {}'.format(file))
+
+	with open(os.path.normpath(file)) as stream:
+		try:
+			config = yaml.safe_load(stream)
+			if not config:
+				print('ERROR: empty or corrupt config file!')
+				return
+
+			try:
+				for section, options in config.items():
+					if section == 'iopts':
+						for opt, values in options.items():
+							iopts[opt][0] = values[0]
+					elif section == 'oopts':
+						for opt, values in options.items():
+							oopts[opt][0] = values[0]
+					elif section == 'dopts':
+						for opt, values in options.items():
+							dopts[opt][0] = values[0]
+					else:
+						print('ERROR: improperly formatted config file detected!')
+						return
+			except (KeyError, IndexError) as error:
+				print('ERROR: unknown option: {}'.format(error))
+				return
+
+		except yaml.YAMLError as error:
+			print(error)
+			return
+
+	print('Loaded config from: {}'.format(file))
+	return True
 
 
 class Clip(object):
@@ -1429,205 +1512,117 @@ class GUI:
 		root.title('MediaToBBCode.py')
 		root.minsize(width=450, height=500)
 		root.iconbitmap(default=resource_path('icon.ico'))
+		padding = 6
+		self.widgets = {}  # dictionary of some mutable widgets, for easier manipulation
 
 		# input options
-		self.media_dir = StringVar()
-		self.media_dir.set(media_dir)
-		self.output_dir = StringVar()
-		self.output_dir.set(output_dir)
-		self.recursive = BooleanVar()
-		self.recursive.set(recursive)
-		self.parse_zip = BooleanVar()
-		self.parse_zip.set(parse_zip)
-
-		frame1 = ttk.LabelFrame(root, text='Input options', padding=6)
-		frame1.pack(fill=X, expand=False, padx=6, pady=6)
+		frame1 = ttk.LabelFrame(root, text='Input options', padding=padding)
+		frame1.pack(fill=X, expand=False, padx=padding, pady=padding)
 		frame1.columnconfigure(1, weight=1)
 
-		ttk.Label(frame1, text='media dir').grid(row=0, column=0, sticky='E')
-		ttk.Label(frame1, text='output dir').grid(row=1, column=0, sticky='E')
+		self.iopts = {}
 
-		entry_mdir = ttk.Entry(frame1, textvariable=self.media_dir)
-		entry_mdir.grid(row=0, column=1, sticky='W, E')
-		entry_odir = ttk.Entry(frame1, textvariable=self.output_dir)
-		entry_odir.grid(row=1, column=1, sticky='W, E')
+		for iopt, values in iopts.items():
+			if 'string' in values[1]:
+				self.iopts[iopt] = StringVar()
+			else:
+				self.iopts[iopt] = BooleanVar()
 
-		browse_mdir = ttk.Button(frame1, text="Browse", command=self.select_mdir)
-		browse_mdir.grid(row=0, column=2)
-		browse_odir = ttk.Button(frame1, text="Browse", command=self.select_odir)
-		browse_odir.grid(row=1, column=2)
+		ttk.Label(frame1, text=iopts['media_dir'][2]).grid(row=0, column=0, sticky='E')
+		ttk.Label(frame1, text=iopts['output_dir'][2]).grid(row=1, column=0, sticky='E')
 
-		self.cbox_recursive = ttk.Checkbutton(
-			frame1, text='Recursive', variable=self.recursive, command=self.state_change)
-		self.cbox_recursive.grid(row=0, column=3, sticky='W')
+		ttk.Entry(frame1, textvariable=self.iopts['media_dir']).grid(row=0, column=1, sticky='W, E')
+		ttk.Entry(frame1, textvariable=self.iopts['output_dir']).grid(row=1, column=1, sticky='W, E')
 
-		self.cbox_zip = ttk.Checkbutton(
-			frame1, text='Parse ZIP', variable=self.parse_zip, command=self.state_change)
-		self.cbox_zip.grid(row=1, column=3, sticky='W')
+		ttk.Button(frame1, text="Browse", command=self.select_mdir).grid(row=0, column=2)
+		ttk.Button(frame1, text="Browse", command=self.select_odir).grid(row=1, column=2)
+
+		ttk.Checkbutton(frame1, text=iopts['recursive'][2], variable=self.iopts['recursive'],
+						command=self.oopt_change).grid(row=0, column=3, sticky='W')
+
+		ttk.Checkbutton(frame1, text=iopts['parse_zip'][2], variable=self.iopts['parse_zip'],
+						command=self.oopt_change).grid(row=1, column=3, sticky='W')
 
 		# notebook to create tabs
-		notebook = ttk.Notebook(root)
+		tabs = ttk.Notebook(root)
 
 		# output options
-		self.output_as_table = BooleanVar()
-		self.output_as_table.set(output_as_table)
-		self.output_individual = BooleanVar()
-		self.output_individual.set(output_individual)
-		self.output_separators = BooleanVar()
-		self.output_separators.set(output_separators)
-		self.output_section_head = BooleanVar()
-		self.output_section_head.set(output_section_head)
-		self.embed_images = BooleanVar()
-		self.embed_images.set(embed_images)
-		self.output_bbcode_thumb = BooleanVar()
-		self.output_bbcode_thumb.set(output_bbcode_thumb)
-		self.whole_filename_is_link = BooleanVar()
-		self.whole_filename_is_link.set(whole_filename_is_link)
-		self.suppress_img_warnings = BooleanVar()
-		self.suppress_img_warnings.set(suppress_img_warnings)
-		self.all_layouts = BooleanVar()
-		self.all_layouts.set(all_layouts)
-		self.output_html = BooleanVar()
-		self.output_html.set(output_html)
+		frame2a = ttk.Frame(tabs, padding=padding)
+		self.oopts = {}
+		oopts_row = 0
 
-		frame2 = ttk.Frame(notebook, padding=6)
-		frame2.pack(fill=X, expand=False)
+		for oopt, values in oopts.items():
+			self.oopts[oopt] = BooleanVar()
+			self.widgets[oopt] = ttk.Checkbutton(frame2a, text=values[2], variable=self.oopts[oopt])
+			self.widgets[oopt].config(command=self.oopt_change)
+			self.widgets[oopt].grid(row=oopts_row, column=0, sticky='W')
 
-		label_table = 'Output as table using [table] tag.'
-		self.cbox_table = ttk.Checkbutton(
-			frame2, text=label_table, variable=self.output_as_table, command=self.state_change)
-		self.cbox_table.grid(row=0, column=0, sticky='W')
-
-		label_individual = 'Output each directory as an individual file (when using "recursive").'
-		self.cbox_individual = ttk.Checkbutton(
-			frame2, text=label_individual, variable=self.output_individual, command=self.state_change)
-		self.cbox_individual.grid(row=1, column=0, sticky='W')
-
-		label_separators = 'Output separators for each parsed directory (when using "recursive").'
-		self.cbox_separators = ttk.Checkbutton(
-			frame2, text=label_separators, variable=self.output_separators, command=self.state_change)
-		self.cbox_separators.grid(row=2, column=0, sticky='W')
-
-		label_sectionhead = 'Output section-head above the table.'
-		self.cbox_sectionhead = ttk.Checkbutton(
-			frame2, text=label_sectionhead, variable=self.output_section_head, command=self.state_change)
-		self.cbox_sectionhead.grid(row=3, column=0, sticky='W')
-
-		label_embedimg = 'Embed images using the [spoiler] tag (otherwise output a simple link).'
-		self.cbox_embedimg = ttk.Checkbutton(
-			frame2, text=label_embedimg, variable=self.embed_images, command=self.state_change)
-		self.cbox_embedimg.grid(row=4, column=0, sticky='W')
-
-		label_thumb = 'Use the [thumb] tag when embedding images.'
-		self.cbox_thumb = ttk.Checkbutton(
-			frame2, text=label_thumb, variable=self.output_bbcode_thumb, command=self.state_change)
-		self.cbox_thumb.grid(row=5, column=0, sticky='W')
-
-		label_wholelink = 'Make the whole file-name a [spoiler] (or url-link) to the image/url.'
-		self.cbox_wholelink = ttk.Checkbutton(
-			frame2, text=label_wholelink, variable=self.whole_filename_is_link, command=self.state_change)
-		self.cbox_wholelink.grid(row=6, column=0, sticky='W')
-
-		label_suppress = 'Suppress error and warning messages for missing images.'
-		self.cbox_suppress = ttk.Checkbutton(
-			frame2, text=label_suppress, variable=self.suppress_img_warnings, command=self.state_change)
-		self.cbox_suppress.grid(row=7, column=0, sticky='W')
-
-		label_alllayouts = 'Output all layout combinations in a single file (for easy testing).'
-		self.cbox_alllayouts = ttk.Checkbutton(
-			frame2, text=label_alllayouts, variable=self.all_layouts, command=self.state_change)
-		self.cbox_alllayouts.grid(row=8, column=0, sticky='W')
-
-		label_html = 'Output to HTML. The output BBCode will be converted (for easy testing).'
-		self.cbox_html = ttk.Checkbutton(
-			frame2, text=label_html, variable=self.output_html, command=self.state_change)
-		self.cbox_html.grid(row=9, column=0, sticky='W')
+			oopts_row += 1
 
 		# styling options
-		frame2b = ttk.Frame(notebook, padding=6)
-		frame2b.pack(fill=X, expand=False)
+		frame2b = ttk.Frame(tabs, padding=padding)
+		self.dopts = {}
+		self.dummy_img = PhotoImage(width=14, height=14)  # creates square buttons
+		self.dummy_btn = Button(frame2b, image=self.dummy_img)  # used for default bg color
+		dopts_row = 0
 
-		self.cTHBG = StringVar()
-		self.cTHBG.set(dopt['cTHBG'][0])
-		self.cTHBD = StringVar()
-		self.cTHBD.set(dopt['cTHBD'][0])
-		self.cTHF = StringVar()
-		self.cTHF.set(dopt['cTHF'][0])
-		self.fTH = StringVar()
-		self.fTH.set(dopt['fTH'][0])
-		self.cTBBG = StringVar()
-		self.cTBBG.set(dopt['cTBBG'][0])
-		self.cTSEPBG = StringVar()
-		self.cTSEPBG.set(dopt['cTSEPBG'][0])
-		self.cTSEPF = StringVar()
-		self.cTSEPF.set(dopt['cTSEPF'][0])
-		self.mFileDetails = StringVar()
-		self.mFileDetails.set(dopt['mFileDetails'][0])
-		self.mImageSets = StringVar()
-		self.mImageSets.set(dopt['mImageSets'][0])
-		self.mFullSizeSS = StringVar()
-		self.mFullSizeSS.set(dopt['mFullSizeSS'][0])
-		self.mFullSizeShow = StringVar()
-		self.mFullSizeShow.set(dopt['mFullSizeShow'][0])
+		for dopt, values in dopts.items():
+			self.dopts[dopt] = StringVar()
+			e = ttk.Entry(frame2b, textvariable=self.dopts[dopt])
+			e.bind('<FocusOut>', lambda event, opt=dopt: self.dopt_change(event, opt))
+			e.grid(row=dopts_row, column=1, padx=3)
 
-		self.e_cTHBG = ttk.Entry(frame2b, textvariable=self.cTHBG)
-		self.e_cTHBG.grid(row=0, column=1)
-		ttk.Label(frame2b, text=dopt['cTHBG'][2]).grid(row=0, column=2, sticky='W')
+			ttk.Label(frame2b, text=values[2]).grid(row=dopts_row, column=2, sticky='W')
 
-		self.e_cTHBD = ttk.Entry(frame2b, textvariable=self.cTHBD)
-		self.e_cTHBD.grid(row=1, column=1)
-		ttk.Label(frame2b, text=dopt['cTHBD'][2]).grid(row=1, column=2, sticky='W')
+			if values[1] == 'color':
+				self.widgets[dopt] = Button(frame2b, image=self.dummy_img)
+				self.widgets[dopt].bind('<ButtonRelease-1>', lambda event, opt=dopt: self.pick_color(event, opt))
+				self.widgets[dopt].grid(row=dopts_row, column=0)
 
-		self.e_cTHF = ttk.Entry(frame2b, textvariable=self.cTHF)
-		self.e_cTHF.grid(row=2, column=1)
-		ttk.Label(frame2b, text=dopt['cTHF'][2]).grid(row=2, column=2, sticky='W')
+			dopts_row += 1
 
-		self.e_fTH = ttk.Entry(frame2b, textvariable=self.fTH)
-		self.e_fTH.grid(row=3, column=1)
-		ttk.Label(frame2b, text=dopt['fTH'][2]).grid(row=3, column=2, sticky='W')
+		# load/save config
+		frame2c = ttk.Frame(tabs, padding=padding)
+		frame2c.columnconfigure(0, weight=1)
+		frame2c.columnconfigure(1, weight=1)
+		frame2c.rowconfigure(0, weight=1)
 
-		self.e_cTBBG = ttk.Entry(frame2b, textvariable=self.cTBBG)
-		self.e_cTBBG.grid(row=4, column=1)
-		ttk.Label(frame2b, text=dopt['cTBBG'][2]).grid(row=4, column=2, sticky='W')
+		ttk.Button(frame2c, text="Save Config", command=self.save_config).grid(row=0, column=0, sticky=E, padx=padding)
+		ttk.Button(frame2c, text="Load Config", command=self.load_config).grid(row=0, column=1, sticky=W, padx=padding)
 
-		self.e_cTSEPBG = ttk.Entry(frame2b, textvariable=self.cTSEPBG)
-		self.e_cTSEPBG.grid(row=5, column=1)
-		ttk.Label(frame2b, text=dopt['cTSEPBG'][2]).grid(row=5, column=2, sticky='W')
+		# about
+		frame2d = ttk.Frame(tabs, padding=40)
+		frame2d.columnconfigure(0, weight=1)
+		frame2d.columnconfigure(1, weight=1)
 
-		self.e_cTSEPF = ttk.Entry(frame2b, textvariable=self.cTSEPF)
-		self.e_cTSEPF.grid(row=6, column=1)
-		ttk.Label(frame2b, text=dopt['cTSEPF'][2]).grid(row=6, column=2, sticky='W')
+		script_font = font.Font(size=12, weight='bold')
+		script_display = ttk.Label(frame2d, text=script, font=script_font)
+		script_display.bind('<Button-1>', lambda event: self.visit_website(event, script_url))
+		script_display.grid(row=0, column=0, columnspan=2)
 
-		self.e_mFileDetails = ttk.Entry(frame2b, textvariable=self.mFileDetails)
-		self.e_mFileDetails.grid(row=7, column=1)
-		ttk.Label(frame2b, text=dopt['mFileDetails'][2]).grid(row=7, column=2, sticky='W')
+		ttk.Label(frame2d, text='author:').grid(row=1, column=0, sticky=E)
+		author_link = ttk.Label(frame2d, text=author)
+		author_link.bind('<Button-1>', lambda event: self.visit_website(event, author_url))
+		author_link.grid(row=1, column=1, sticky=W)
 
-		self.e_mImageSets = ttk.Entry(frame2b, textvariable=self.mImageSets)
-		self.e_mImageSets.grid(row=8, column=1)
-		ttk.Label(frame2b, text=dopt['mImageSets'][2]).grid(row=8, column=2, sticky='W')
+		ttk.Label(frame2d, text='version:').grid(row=2, column=0, sticky=E)
+		ttk.Label(frame2d, text=version).grid(row=2, column=1, sticky=W)
 
-		self.e_mFullSizeSS = ttk.Entry(frame2b, textvariable=self.mFullSizeSS)
-		self.e_mFullSizeSS.grid(row=9, column=1)
-		ttk.Label(frame2b, text=dopt['mFullSizeSS'][2]).grid(row=9, column=2, sticky='W')
+		ttk.Label(frame2d, text='compile date:').grid(row=3, column=0, sticky=E)
+		ttk.Label(frame2d, text=compile_date).grid(row=3, column=1, sticky=W)
 
-		self.e_mFullSizeShow = ttk.Entry(frame2b, textvariable=self.mFullSizeShow)
-		self.e_mFullSizeShow.grid(row=10, column=1)
-		ttk.Label(frame2b, text=dopt['mFullSizeShow'][2]).grid(row=10, column=2, sticky='W')
+		# fill the tabs
+		tabs.add(frame2a, text='Output options')
+		tabs.add(frame2b, text='Styling options')
+		tabs.add(frame2c, text='Save/Load config')
+		tabs.add(frame2d, text='About')
+		tabs.pack(fill=X, expand=False, padx=padding, pady=padding)
 
-		# TODO add color options using a loop? Because this is just silly
-		self.b_cTHBG = Button(frame2b, bg=self.cTHBG.get(), width=1, height=1, command=lambda: self.color_picker(self.cTHBG))
-		# self.b_cTHBG.grid(row=0, column=0)
-
-		# fill the notebook
-		notebook.add(frame2, text='Output options')
-		notebook.add(frame2b, text='Styling options')
-		notebook.pack(fill=X, expand=False, padx=6, pady=6)
-
-		# master buttons
-		frame3 = ttk.Frame(root, padding=6)
+		# master button(s)
+		frame3 = ttk.Frame(root, padding=padding)
 		frame3.pack(expand=False)
 
-		self.run_button = ttk.Button(frame3, text="RUN", command=self.set_options)
+		self.run_button = ttk.Button(frame3, text="RUN", command=lambda run=True: self.set_options(run))
 		self.run_button.pack()
 
 		# log window
@@ -1636,118 +1631,166 @@ class GUI:
 		frame4.columnconfigure(0, weight=1)
 		frame4.rowconfigure(0, weight=1)
 
-		log_font = font.nametofont('TkFixedFont').configure(size=8)
+		log_font = font.nametofont('TkFixedFont').config(size=8)
 		self.log_text = scrolledtext.ScrolledText(frame4, height=9, font=log_font, state=DISABLED)
 		self.log_text.grid(row=0, column=0, sticky=(N, S, E, W))
 
 		sys.stdout = GUI.StdoutRedirector(self.log_text)
 
-		self.state_change()
+		# set initial state
+		self.get_options()
+		self.oopt_change()
+		self.dopt_change()
 
 	def select_mdir(self):
-		selected = filedialog.askdirectory(title='Select media directory', initialdir=self.media_dir)
-		self.media_dir.set(selected)
+		directory = filedialog.askdirectory(title='Select media directory', initialdir=self.iopts['media_dir'])
+		self.iopts['media_dir'].set(directory)
 
 	def select_odir(self):
-		selected = filedialog.askdirectory(title='Select output directory', initialdir=self.output_dir)
-		self.output_dir.set(selected)
+		directory = filedialog.askdirectory(title='Select output directory', initialdir=self.iopts['output_dir'])
+		self.iopts['output_dir'].set(directory)
 
-	def state_change(self):
-		if self.recursive.get():
-			self.cbox_individual.config(state=NORMAL)
-			self.cbox_separators.config(state=NORMAL)
+	def oopt_change(self):
+		if self.iopts['recursive'].get():
+			self.widgets['output_individual'].config(state=NORMAL)
+			self.widgets['output_separators'].config(state=NORMAL)
 		else:
-			self.cbox_individual.config(state=DISABLED)
-			self.cbox_separators.config(state=DISABLED)
+			self.widgets['output_individual'].config(state=DISABLED)
+			self.widgets['output_separators'].config(state=DISABLED)
 
-		if self.output_individual.get() or not self.recursive.get():
-			self.cbox_separators.config(state=DISABLED)
+		if self.oopts['output_individual'].get() or not self.iopts['recursive'].get():
+			self.widgets['output_separators'].config(state=DISABLED)
 		else:
-			self.cbox_separators.config(state=NORMAL)
+			self.widgets['output_separators'].config(state=NORMAL)
 
-		if self.output_as_table.get():
-			self.cbox_sectionhead.config(state=NORMAL)
+		if self.oopts['output_as_table'].get():
+			self.widgets['output_section_head'].config(state=NORMAL)
 		else:
-			self.cbox_sectionhead.config(state=DISABLED)
+			self.widgets['output_section_head'].config(state=DISABLED)
 
-		if self.embed_images.get():
-			self.cbox_thumb.config(state=NORMAL)
+		if self.oopts['embed_images'].get():
+			self.widgets['output_bbcode_thumb'].config(state=NORMAL)
 		else:
-			self.cbox_thumb.config(state=DISABLED)
+			self.widgets['output_bbcode_thumb'].config(state=DISABLED)
 
-	def color_picker(self, var):
-		self.log_text.config(state=NORMAL)  # todo temp
-		color = colorchooser.askcolor(initialcolor=var.get())[1]
-		var.set(color)
-		print(color)
+	def dopt_change(self, event=None, dopt=None):
+		if dopt:
+			# single display option widget
+			try:
+				widgets_to_update = {dopt: self.widgets[dopt]}
+			except KeyError:
+				return
+		else:
+			# all display option widgets
+			widgets_to_update = self.widgets
 
-	def set_options(self):
-		global media_dir
-		global output_dir
-		global recursive
-		global parse_zip
+		for dopt, widget in widgets_to_update.items():
+			if isinstance(widget, Button):
+				color = self.dopts[dopt].get()
+				new_color = self.validate_color(color)
+				if new_color:
+					widget.config(bg=new_color[0], activebackground=new_color[0])
+				else:
+					no_bg = self.dummy_btn.cget('bg')
+					widget.config(bg=no_bg, activebackground=no_bg)
 
-		global output_as_table
-		global output_individual
-		global output_separators
-		global output_section_head
-		global embed_images
-		global output_bbcode_thumb
-		global whole_filename_is_link
-		global suppress_img_warnings
-		global all_layouts
-		global output_html
+	def pick_color(self, event, dopt):
+		old_color = self.dopts[dopt].get()
+		the_rest = ''
+		if not old_color:
+			# empty string or not initialized
+			old_color = '#FFF'
+		else:
+			old_color = self.validate_color(old_color)
+			if old_color:
+				the_rest = old_color[1].strip()
+				old_color = old_color[0]
+			else:
+				old_color = '#FFF'
 
-		global dopt
+		# get new hex color
+		new_color = colorchooser.askcolor(initialcolor=old_color)[1]
+		if new_color:
+			new_color = self.validate_color(new_color)
+			if new_color:
+				self.dopts[dopt].set((new_color[0].upper() + ' ' + the_rest).strip())
+				self.dopt_change(None, dopt)
 
-		media_dir = self.media_dir.get()
-		output_dir = self.output_dir.get()
-		recursive = self.recursive.get()
-		parse_zip = self.parse_zip.get()
+	@staticmethod
+	def validate_color(string):
+		match = re.search(r'#(?:[0-9a-fA-F]{1,2}){3}', string)
+		if match:
+			the_rest = string.replace(match.group(0), '')
+			return [match.group(0), the_rest]
+		else:
+			return False
 
-		output_as_table = self.output_as_table.get()
-		output_individual = self.output_individual.get()
-		output_separators = self.output_separators.get()
-		output_section_head = self.output_section_head.get()
-		embed_images = self.embed_images.get()
-		output_bbcode_thumb = self.output_bbcode_thumb.get()
-		whole_filename_is_link = self.whole_filename_is_link.get()
-		suppress_img_warnings = self.suppress_img_warnings.get()
-		all_layouts = self.all_layouts.get()
-		output_html = self.output_html.get()
+	def save_config(self):
+		file_save_options = dict(title='Save config file',
+								initialdir=self.iopts['output_dir'],
+								initialfile='mediatobbcode-config.yml',
+								defaultextension='.yml',
+								filetypes=[('YAML Files', '*.yml;*yaml'), ('All Files', '*.*')])
+		file = filedialog.asksaveasfilename(**file_save_options)
+		if file:
+			self.log_text.config(state=NORMAL)
+			self.set_options()
+			save_config(file)
+			self.log_text.config(state=DISABLED)
 
-		dopt['cTHBG'][0] = self.cTHBG.get()
-		dopt['cTHBD'][0] = self.cTHBD.get()
-		dopt['cTHF'][0] = self.cTHF.get()
-		dopt['fTH'][0] = self.fTH.get()
-		dopt['cTBBG'][0] = self.cTBBG.get()
-		dopt['cTSEPBG'][0] = self.cTSEPBG.get()
-		dopt['cTSEPF'][0] = self.cTSEPF.get()
-		dopt['mFileDetails'][0] = self.mFileDetails.get()
-		dopt['mImageSets'][0] = self.mImageSets.get()
-		dopt['mFullSizeSS'][0] = self.mFullSizeSS.get()
-		dopt['mFullSizeShow'][0] = self.mFullSizeShow.get()
+	def load_config(self):
+		file_load_options = dict(title='Load config file',
+								initialdir=self.iopts['output_dir'],
+								filetypes=[('YAML Files', '*.yml;*yaml'), ('All Files', '*.*')])
+		file = filedialog.askopenfilename(**file_load_options)
+		if file:
+			self.log_text.config(state=NORMAL)
+			success = load_config(file)
+			if success:
+				self.get_options()
+				self.oopt_change()
+				self.dopt_change()
+			self.log_text.config(state=DISABLED)
 
-		# create a new tread for the actual processing, so the GUI won't freeze
-		threading.Thread(target=self.run).start()
+	@staticmethod
+	def visit_website(event, url):
+		webbrowser.open(url, new=2)
+
+	def get_options(self):
+		for iopt in self.iopts:
+			self.iopts[iopt].set(iopts[iopt][0])
+
+		for oopt in self.oopts:
+			self.oopts[oopt].set(oopts[oopt][0])
+
+		for dopt in self.dopts:
+			self.dopts[dopt].set(dopts[dopt][0])
+
+	def set_options(self, run=False):
+		global iopts, oopts, dopts
+
+		for iopt in self.iopts:
+			iopts[iopt][0] = self.iopts[iopt].get()
+
+		for oopt in self.oopts:
+			oopts[oopt][0] = self.oopts[oopt].get()
+
+		for dopt in self.dopts:
+			dopts[dopt][0] = self.dopts[dopt].get()
+
+		if run:
+			# create a new tread for the actual processing, so the GUI won't freeze
+			Thread(target=self.run).start()
 
 	def run(self):
 		self.log_text.config(state=NORMAL)
 		self.run_button.config(state=DISABLED)
 		self.log_text.delete(1.0, END)
 
-		set_paths_and_run()
+		set_vars_and_run()
 
 		self.log_text.config(state=DISABLED)
 		self.run_button.config(state=NORMAL)
-
-
-layouts_busy = False  # don't touch!
-layouts_last = False  # used to only run format_html_output once
-debug_imghost_slugs = False  # for debugging
-cERR = '#F00'
-cWARN = '#F80'
-author = 'Output script by [url=https://github.com/PayBas/MediaToBBCode]PayBas[/url].'  # TODO
 
 
 def resource_path(relative_path):
@@ -1763,26 +1806,11 @@ def resource_path(relative_path):
 	return os.path.join(base_path, relative_path)
 
 
-def main(argv):
+def main(argv):  # TODO add option to load config.yml from command-line
 	"""
 	Process command-line inputs or load GUI
 	"""
-	global media_dir
-	global output_dir
-	global recursive
-	global parse_zip
-
-	global output_as_table
-	global output_individual
-	global output_separators
-	global output_section_head
-	global embed_images
-	global output_bbcode_thumb
-	global whole_filename_is_link
-	global suppress_img_warnings
-	global all_layouts
-	global output_html
-
+	global iopts, oopts, dopts
 	global debug_imghost_slugs
 
 	h = 'mediatobbcode.py\n' \
@@ -1796,10 +1824,10 @@ def main(argv):
 		'For a full list of command-line options, see the online documentation.'
 
 	try:
-		opts, args = getopt.getopt(argv, 'hm:o:rzlifbuntsawx',
+		options, args = getopt.getopt(argv, 'hm:o:rzlifbuntsawx',
 			['help', 'mediadir=', 'outputdir=', 'recursive', 'zip' 'list', 'individual', 'flat',
 			'bare', 'url', 'nothumb', 'tinylink', 'suppress', 'all', 'webhtml', 'xdebug'])
-		if not opts:
+		if not options:
 			# create GUI to set variables
 			root = Tk()
 			GUI(root)
@@ -1810,45 +1838,45 @@ def main(argv):
 		print(h)
 		sys.exit(2)
 
-	for opt, arg in opts:
+	for opt, arg in options:
 		if opt in ('-h', '--help'):
 			print(h)
 			sys.exit()
 
 		elif opt in ('-m', '--mediadir'):
-			media_dir = arg
+			iopts['media_dir'][0] = arg
 		elif opt in ('-o', '--outputdir'):
-			output_dir = arg
+			iopts['output_dir'][0] = arg
 		elif opt in ('-r', '--recursive'):
-			recursive = True
+			iopts['recursive'][0] = True
 		elif opt in ('-z', '--zip'):
-			parse_zip = True
+			iopts['parse_zip'][0] = True
 
 		elif opt in ('-l', '--list'):
-			output_as_table = False
+			oopts['output_as_table'][0] = False
 		elif opt in ('-i', '--individual'):
-			output_individual = True
+			oopts['output_individual'][0] = True
 		elif opt in ('-f', '--flat'):
-			output_separators = False
+			oopts['output_separators'][0] = False
 		elif opt in ('-b', '--bare'):
-			output_section_head = False
+			oopts['output_section_head'][0] = False
 		elif opt in ('-u', '--url'):
-			embed_images = False
+			oopts['embed_images'][0] = False
 		elif opt in ('-n', '--nothumb'):
-			output_bbcode_thumb = False
+			oopts['output_bbcode_thumb'][0] = False
 		elif opt in ('-t', '--tinylink'):
-			whole_filename_is_link = False
+			oopts['whole_filename_is_link'][0] = False
 		elif opt in ('-s', '--suppress'):
-			suppress_img_warnings = True
+			oopts['suppress_img_warnings'][0] = True
 		elif opt in ('-a', '--all'):
-			all_layouts = True
+			oopts['all_layouts'][0] = True
 		elif opt in ('-w', '--webhtml'):
-			output_html = True
+			oopts['output_html'][0] = True
 		elif opt in ('-x', '--xdebug'):
 			debug_imghost_slugs = True
 
 	# initialize the script using the command-line arguments
-	set_paths_and_run()
+	set_vars_and_run()
 
 
 # hi there :)

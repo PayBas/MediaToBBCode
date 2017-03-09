@@ -34,16 +34,18 @@ These requirements only apply if you're using the python script. The executable 
 
 For Ubuntu this would be something like:
 ````
-sudo apt install mediainfo
-sudo apt install python3-pip
-pip3 install pymediainfo
-pip3 install pillow   # if you wish to process image-sets
-pip3 install bbcode   # if you wish to output as HTML
+sudo apt install mediainfo    # MediaInfo library
+sudo apt install python3-pip  # python package manager
+sudo apt install python3-tk   # Tkinter for the GUI
+pip3 install pymediainfo      # python interface for MediaInfo
+pip3 install ruamel-yaml      # YAML interpreter for saving/loading configs
+pip3 install pillow           # if you wish to process image-sets
+pip3 install bbcode           # if you wish to output as HTML
 ````
 
 ## Instructions
 
-1. Make sure you have all the required elements listed above (or use the executable GUI).
+1. Make sure you have all the required elements listed above (or use the executable GUI in `/dist`).
 1. Use your favorite thumbnail maker application to create screenshots of all the videos. Make sure that the output images have the exact same file-name as the original videos (besides the extension obviously). But __don't__ include the original media extension in the output name. So `foo.mp4` should give `foo.jpg`, __not__ `foo.mp4.jpg`. 
 1. Upload all the (thumbnail) images to one of the following image-hosts: *
     * [ImageBam.com](http://www.imagebam.com/)
@@ -60,7 +62,7 @@ pip3 install bbcode   # if you wish to output as HTML
 1. Rename the txt-file(s) you just created containing the image-host data, to the directory name you want to parse. So if you want to parse `/home/me/Vids/Led Zeppelin`, name the file `Led Zeppelin.txt` (and `Led Zeppelin_alt.txt` if you want to add a backup host). 
 1. Place the txt-file(s) in the directory where you want your output files to be created (like `~/Desktop/output/`).
 1. Run: `python3 mediatobbcode.py -m "/home/me/Vids/Led Zeppelin" -o ~/Desktop/output/`
-    * __Or use the executable GUI.__
+    * __Or use the executable GUI.__ You can find it in `/dist`
 1. Copy the contents of the generated file (`Led Zeppelin_output.txt` in this case) into your presentation.
 
 \* _These image-hosts are supported because they all share one important similarity: the file-names for the uploaded images are predictable and the slugs are reproducable offline. Without that, we wouldn't be able to match our output to the correct online images._
@@ -68,7 +70,7 @@ pip3 install bbcode   # if you wish to output as HTML
 \** _If you want to add an additional image-host as a backup in case the primary host goes down, simply add an extra txt containing the secondary host's output in a file with the `_alt` suffix (`my-clips_alt.txt` in this example).
 You can also add a higher-resolution image-list which will be displayed outside the table (thus being less constrained), by adding a file with the `_fullsize` suffix (`my-clips_fullsize.txt` in this example)._
 
-#### Extra example
+#### Command-line example
 Files (using absolute paths in this example, but relative paths work equally well):
 ````
 /mnt/
@@ -114,6 +116,7 @@ Output:
 * `-s` or `--suppress` Prevents warning messages from appearing in the output if no suitable image or image-link was found.
 * `-a` or `--all` Will output all 7 different layout options below each other, easy for testing and picking your favorite. Note that this will include layouts with `[table]` and `[spoiler]` tags, so be careful if these aren't supported.
 * `-w` or `--webhtml` Will convert the final BBCode output to HTML. (experimental)
+* `-c` or `--config <file>` Load settings from a previously saved config file.
 * `-x` or `--xdebug` For debugging image-host output slugs. Only for developers.
 
 ### Support

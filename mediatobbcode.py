@@ -115,11 +115,11 @@ dopts = OrderedDict([
 # DON'T TOUCH ANYTHING BELOW THIS LINE UNLESS YOU KNOW WHAT YOU'RE DOING #
 ##########################################################################
 
-opts = dict()  # contains all options (with only code values), populated fresh each run
+opts = dict()  # Contains all options (with only code values), populated (or updated) fresh each run.
 
-layouts_busy = False  # don't touch!
-layouts_last = False  # used to only run format_html_output once
-debug_imghost_slugs = False  # for debugging
+layouts_busy = False  # Don't touch! Used to determine if we are still in the all_layouts loop.
+layouts_last = False  # Don't touch! Used to only run format_html_output once.
+debug_imghost_slugs = False  # For debugging. Only available from the command-line.
 cERR = '#F00'  # output color for errors
 cWARN = '#F80'  # output color for warnings
 
@@ -127,8 +127,8 @@ author = 'PayBas'
 author_url = 'https://github.com/PayBas'
 script = 'MediaToBBCode.py'
 script_url = 'https://github.com/PayBas/MediaToBBCode'
-version = '1.1.1'
-compile_date = '08-03-2017'
+version = '1.1.2'
+compile_date = '09-03-2017'
 credits_bbcode = 'Output script by [url={}]PayBas[/url].'.format(script_url)
 
 
@@ -136,11 +136,6 @@ def set_vars_and_run():
 	"""
 	Determines how the script will run and sets all the correct paths.
 	"""
-	# if we just want to debug image-host matching for development
-	if debug_imghost_slugs:
-		debug_imghost_matching()
-		sys.exit()
-
 	global opts
 
 	# put all the variables (as set by command-line or GUI) in one big dictionary
@@ -1423,34 +1418,39 @@ def load_config(file):
 	global iopts, oopts, dopts
 	print('Loading config from: {}'.format(file))
 
-	with open(os.path.normpath(file)) as stream:
-		try:
-			config = yaml.safe_load(stream)
-			if not config:
-				print('ERROR: empty or corrupt config file!')
-				return
-
+	try:
+		with open(os.path.normpath(os.path.expanduser(file))) as stream:
 			try:
-				for section, options in config.items():
-					if section == 'iopts':
-						for opt, values in options.items():
-							iopts[opt][0] = values[0]
-					elif section == 'oopts':
-						for opt, values in options.items():
-							oopts[opt][0] = values[0]
-					elif section == 'dopts':
-						for opt, values in options.items():
-							dopts[opt][0] = values[0]
-					else:
-						print('ERROR: improperly formatted config file detected!')
-						return
-			except (KeyError, IndexError) as error:
-				print('ERROR: unknown option: {}'.format(error))
+				config = yaml.safe_load(stream)
+				if not config:
+					print('ERROR: empty or corrupt config file!')
+					return
+
+				try:
+					for section, options in config.items():
+						if section == 'iopts':
+							for opt, values in options.items():
+								iopts[opt][0] = values[0]
+						elif section == 'oopts':
+							for opt, values in options.items():
+								oopts[opt][0] = values[0]
+						elif section == 'dopts':
+							for opt, values in options.items():
+								dopts[opt][0] = values[0]
+						else:
+							print('ERROR: improperly formatted config file detected!')
+							break
+				except (KeyError, IndexError) as error:
+					print('ERROR: unknown option: {}'.format(error))
+					return
+
+			except yaml.YAMLError as error:
+				print(error)
 				return
 
-		except yaml.YAMLError as error:
-			print(error)
-			return
+	except (IOError, OSError):
+		print('ERROR: Couldn\'t open config file: {}'.format(file))
+		return
 
 	print('Loaded config from: {}'.format(file))
 	return True
@@ -1511,7 +1511,8 @@ class GUI:
 	def __init__(self, root):
 		root.title('MediaToBBCode.py')
 		root.minsize(width=450, height=500)
-		root.iconbitmap(default=resource_path('icon.ico'))
+		if "nt" == os.name:
+			root.iconbitmap(default=resource_path('icon.ico'))
 		padding = 6
 		self.widgets = {}  # dictionary of some mutable widgets, for easier manipulation
 
@@ -1730,7 +1731,7 @@ class GUI:
 								initialdir=self.iopts['output_dir'],
 								initialfile='mediatobbcode-config.yml',
 								defaultextension='.yml',
-								filetypes=[('YAML Files', '*.yml;*yaml'), ('All Files', '*.*')])
+								filetypes=[('YAML Files', '*.yml;*.yaml'), ('All Files', '*')])
 		file = filedialog.asksaveasfilename(**file_save_options)
 		if file:
 			self.log_text.config(state=NORMAL)
@@ -1741,7 +1742,7 @@ class GUI:
 	def load_config(self):
 		file_load_options = dict(title='Load config file',
 								initialdir=self.iopts['output_dir'],
-								filetypes=[('YAML Files', '*.yml;*yaml'), ('All Files', '*.*')])
+								filetypes=[('YAML Files', '*.yml;*.yaml'), ('All Files', '*')])
 		file = filedialog.askopenfilename(**file_load_options)
 		if file:
 			self.log_text.config(state=NORMAL)
@@ -1806,7 +1807,7 @@ def resource_path(relative_path):
 	return os.path.join(base_path, relative_path)
 
 
-def main(argv):  # TODO add option to load config.yml from command-line
+def main(argv):
 	"""
 	Process command-line inputs or load GUI
 	"""
@@ -1821,12 +1822,14 @@ def main(argv):  # TODO add option to load config.yml from command-line
 		'- parse all media files in dir -m and output to -o\n\n' \
 		'mediatobbcode.py -m <media dir> -r -o <output dir>\n' \
 		'- parse all media files in -m recursively and output to -o\n\n' \
+		'mediatobbcode.py -c <config file>\n' \
+		'- use previously saved config file to set script options\n\n' \
 		'For a full list of command-line options, see the online documentation.'
 
 	try:
-		options, args = getopt.getopt(argv, 'hm:o:rzlifbuntsawx',
+		options, args = getopt.getopt(argv, 'hm:o:rzlifbuntsawc:x',
 			['help', 'mediadir=', 'outputdir=', 'recursive', 'zip' 'list', 'individual', 'flat',
-			'bare', 'url', 'nothumb', 'tinylink', 'suppress', 'all', 'webhtml', 'xdebug'])
+			'bare', 'url', 'nothumb', 'tinylink', 'suppress', 'all', 'webhtml', 'config=', 'xdebug'])
 		if not options:
 			# create GUI to set variables
 			root = Tk()
@@ -1872,8 +1875,15 @@ def main(argv):  # TODO add option to load config.yml from command-line
 			oopts['all_layouts'][0] = True
 		elif opt in ('-w', '--webhtml'):
 			oopts['output_html'][0] = True
+
+		elif opt in ('-c', '--config'):
+			success = load_config(arg)
+			if not success:
+				sys.exit()
 		elif opt in ('-x', '--xdebug'):
-			debug_imghost_slugs = True
+			# if we just want to debug image-host matching for development
+			debug_imghost_matching()
+			sys.exit()
 
 	# initialize the script using the command-line arguments
 	set_vars_and_run()

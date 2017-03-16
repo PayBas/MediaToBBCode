@@ -2,22 +2,24 @@
 
 import getopt
 import os
+import re
+import sys
 import unicodedata
 import webbrowser
 from collections import OrderedDict
+from copy import deepcopy
 from hashlib import md5
 from ruamel import yaml
-from threading import Thread
-from tkinter import *
-from tkinter import ttk, filedialog, font, colorchooser, scrolledtext
 from urllib.parse import urlparse
 
-
-##########################################################################
-# DON'T TOUCH ANYTHING ABOVE THIS LINE UNLESS YOU KNOW WHAT YOU'RE DOING #
-##########################################################################
+from PyQt5.QtCore import Qt, QObject, QThread, pyqtSignal, pyqtSlot
+from PyQt5.QtGui import QColor, QFont, QIcon, QTextCursor
+from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QGridLayout, QHBoxLayout, QGroupBox, QTabWidget,\
+	QLabel, QLineEdit, QPlainTextEdit, QCheckBox, QPushButton, QFrame, QFileDialog, QColorDialog
 
 """
+[input options]
+
 @ media_dir
 The directory to use when looking for media files to process.
 
@@ -31,9 +33,14 @@ Will enable recursive searching for files. Meaning it will include all sub-direc
 Enables parsing of compressed (ZIP) archives for image-sets. All image-sets will be output below other parsed media.
 Requires Pillow.
 
+[output options]
 
 @ output_as_table
 Generate table output. If not, a simpler (ugly) flat list will be generated.
+Requires support for [table] tags by the BBCode engine used by your website.
+
+@ output_table_titles
+Generate nice heading title(s) above the table/list.
 Requires support for [table] tags by the BBCode engine used by your website.
 
 @ output_individual
@@ -43,10 +50,6 @@ Only applies if "recursive = True".
 @ output_separators
 Generate separators (with the directory name) when switching directories in recursive mode.
 Only applies if "recursive = True" and "output_individual = False"
-
-@ output_section_head
-Generate a nice heading above the table/list.
-Requires support for [table] tags by the BBCode engine used by your website.
 
 @ embed_images
 Embed the image/thumbnails in the output. Otherwise a link to the image will be embedded.
@@ -71,52 +74,68 @@ Note that this will include layouts with [table] and [spoiler] tags, so be caref
 @ output_html
 Converts the output BBCode directly to HTML. This can be used for rapid testing.
 Requires bbcode module.
+
+[image-list options]
+
+@imagelist_pri
+Path to the primary image-list file. This txt file contains BBCode output from the primary image-host.
+
+@imagelist_alt
+Path to the secondary (alternative) image-list file. This txt file contains BBCode output from the secondary image-host.
+
+@imagelist_fsz
+Path to the full-size image-list file. This can be used to output all images in-line above the normal output.
+
+@use_imagelist_fsz
+Whether to use the full-size image-list to display all full-sized images in-line.
+
+@use_primary_as_fsz
+Will switch to using the primary image-list as the full-sized image-list, which may be suitable in some situaitons.
 """
 
-# Input options
-iopts = OrderedDict([
-	('media_dir', ['./videos', 'string', 'Media dir']),
-	('output_dir', ['', 'string', 'Output dir']),
-	('recursive', [False, 'bool', 'Recursive']),
-	('parse_zip', [False, 'bool', 'Parse ZIP']),
+# default config with additional information for the GUI
+config = OrderedDict([
+	('iopts', OrderedDict([
+		('media_dir', ['./videos', 'Media dir']),
+		('output_dir', ['', 'Output dir']),
+		('recursive', [False, 'Recursive']),
+		('parse_zip', [False, 'Parse ZIP']),
+	])),
+	('oopts', OrderedDict([
+		('output_as_table', [True, 'Output as table using [table] tag.']),
+		('output_table_titles', [True, 'Output title(s) above the table(s).']),
+		('output_individual', [False, 'Output each directory as an individual file (when using "recursive").']),
+		('output_separators', [True, 'Output separators for each parsed directory (when using "recursive").']),
+		('embed_images', [True, 'Embed images using the [spoiler] tag (otherwise output a simple link).']),
+		('output_bbcode_thumb', [True, 'Use the [thumb] tag when embedding images.']),
+		('whole_filename_is_link', [True, 'Make the whole file-name a [spoiler] (or url-link) to the image/url.']),
+		('suppress_img_warnings', [False, 'Suppress error and warning messages for missing images.']),
+		('all_layouts', [False, 'Output all layout combinations in a single file (for easy testing).']),
+		('output_html', [False, 'Output to HTML. The output BBCode will be converted (for easy testing).'])
+	])),
+	('mopts', OrderedDict([
+		('imagelist_pri', ['', 'string', 'Primary image-list file']),
+		('imagelist_alt', ['', 'string', 'Secondary image-list file']),
+		('use_imagelist_fsz', [False, 'bool', 'Add list of full-sized images to output']),
+		('use_primary_as_fsz', [False, 'bool', 'Use primary image-list for full-sized output']),
+		('imagelist_fsz', ['', 'string', 'Full-size image-list file'])
+	])),
+	('dopts', OrderedDict([
+		('cTHBG', ['#003875', 'color', 'table header background']),
+		('cTHBD', ['#0054B0', 'color', 'table header border']),
+		('cTHF', ['#FFF', 'color', 'table header font color']),
+		('fTH', ['Verdana', 'font', 'table header font']),
+		('cTBBG', ['#F4F4F4', 'color', 'table body background']),
+		('cTSEPBG', ['#B0C4DE', 'color', 'table body separator background']),
+		('cTSEPF', ['', 'color', 'table body separator font color']),
+		('tFileDetails', ['FILE DETAILS', 'text', 'file-details table title']),
+		('tImageSets', ['IMAGE-SET DETAILS', 'text', '(when using the "Parse ZIP" option)']),
+		('tFullSizeSS', ['SCREENS (inline)', 'text', '(when using the full-size images option)']),
+		('tFullSizeShow', ['SCREENS', 'text', '(when using the full-size images option)'])
+	]))
 ])
 
-# Output options
-oopts = OrderedDict([
-	('output_as_table', [True, 'bool', 'Output as table using [table] tag.']),
-	('output_individual', [False, 'bool', 'Output each directory as an individual file (when using "recursive").']),
-	('output_separators', [True, 'bool', 'Output separators for each parsed directory (when using "recursive").']),
-	('output_section_head', [True, 'bool', 'Output section-head above the table.']),
-	('embed_images', [True, 'bool', 'Embed images using the [spoiler] tag (otherwise output a simple link).']),
-	('output_bbcode_thumb', [True, 'bool', 'Use the [thumb] tag when embedding images.']),
-	('whole_filename_is_link', [True, 'bool', 'Make the whole file-name a [spoiler] (or url-link) to the image/url.']),
-	('suppress_img_warnings', [False, 'bool', 'Suppress error and warning messages for missing images.']),
-	('all_layouts', [False, 'bool', 'Output all layout combinations in a single file (for easy testing).']),
-	('output_html', [False, 'bool', 'Output to HTML. The output BBCode will be converted (for easy testing).'])
-])
-
-# Display options
-dopts = OrderedDict([
-	('cTHBG', ['#003875', 'color', 'table header background']),
-	('cTHBD', ['#0054B0', 'color', 'table header border']),
-	('cTHF', ['#FFF', 'color', 'table header font color']),
-	('fTH', ['Verdana', 'font', 'table header font']),
-	('cTBBG', ['#F4F4F4', 'color', 'table body background']),
-	('cTSEPBG', ['#B0C4DE', 'color', 'table body separator background']),
-	('cTSEPF', ['', 'color', 'table body separator font color']),
-	('tFileDetails', ['FILE DETAILS', 'text', 'file-details table title']),
-	('tImageSets', ['IMAGE-SET DETAILS', 'text', 'image-set table title']),
-	('tFullSizeSS', ['SCREENS (inline)', 'text', '(when using _fullsize.txt images)']),
-	('tFullSizeShow', ['SCREENS', 'text', '(when using _fullsize.txt images)'])
-])
-
-
-##########################################################################
-# DON'T TOUCH ANYTHING BELOW THIS LINE UNLESS YOU KNOW WHAT YOU'RE DOING #
-##########################################################################
-
-opts = dict()  # Contains all options (with only code values), populated (or updated) fresh each run.
-
+opts = dict()  # Don't touch!
 layouts_busy = False  # Don't touch! Used to determine if we are still in the all_layouts loop.
 layouts_last = False  # Don't touch! Used to only run format_html_output once.
 debug_imghost_slugs = False  # For debugging. Only available from the command-line.
@@ -127,24 +146,28 @@ author = 'PayBas'
 author_url = 'https://github.com/PayBas'
 script = 'MediaToBBCode.py'
 script_url = 'https://github.com/PayBas/MediaToBBCode'
-version = '1.1.2'
-compile_date = '09-03-2017'
+version = '1.2.0'
+compile_date = '16-03-2017'
 credits_bbcode = 'Output script by [url={}]PayBas[/url].'.format(script_url)
 
 
-def set_vars_and_run():
+def populate_opts():
 	"""
-	Determines how the script will run and sets all the correct paths.
+	Put all the config options into one big (but simple) dictionary which can be manipulated by the command-line or GUI.
+	This is much easier to work with than the full _config_ dictionary.
 	"""
 	global opts
 
-	# put all the variables (as set by command-line or GUI) in one big dictionary
-	for opt, value in iopts.items():
-		opts[opt] = value[0]
-	for opt, value in oopts.items():
-		opts[opt] = value[0]
-	for opt, value in dopts.items():
-		opts[opt] = value[0]
+	for group in config.values():
+		for opt, values in group.items():
+			opts[opt] = values[0]
+
+
+def set_paths_and_run():
+	"""
+	Sanitizes and sets the correct input and output directories, before starting the parsing process.
+	"""
+	global opts
 
 	# set the correct output_dir
 	if not opts['output_dir'] and not opts['media_dir']:
@@ -286,7 +309,7 @@ def parse_media_files():
 
 def parse_zip_files(root, file):  # TODO add support for rar, 7z, tar, etc.
 	"""
-	Processes a compressed archive and attempt to get information on the image-set located therein.
+	Processes a compressed archive and attempts to get information on the image-set located therein.
 	We could have used MediaInfo for this too, but Pillow is easier and more reliable.
 	Requires Pillow
 	"""
@@ -360,9 +383,9 @@ def format_final_output(items, source):
 
 	file_output = working_file + '_output.txt'
 	file_output_html = working_file + '_output.html'
-	file_img_list = working_file + '.txt'
-	file_img_list_alt = working_file + '_alt.txt'
-	file_img_list_fullsize = working_file + '_fullsize.txt'
+	file_img_list = opts['imagelist_pri'] if opts['imagelist_pri'] else working_file + '.txt'
+	file_img_list_alt = opts['imagelist_alt'] if opts['imagelist_alt'] else working_file + '_alt.txt'
+	file_img_list_fullsize = opts['imagelist_fsz'] if opts['imagelist_fsz'] else working_file + '_fullsize.txt'
 
 	# create an output loop for generating all different layouts
 	if opts['all_layouts'] and not layouts_busy:
@@ -389,14 +412,17 @@ def format_final_output(items, source):
 		output.close()
 		return
 
+	# TODO: create a spoiler for each dir when using recursive
 	# try to create a list of all the full-sized images (if present) for fast single-click browsing
-	if not opts['all_layouts']:
+	if opts['use_imagelist_fsz'] and not opts['all_layouts']:
+		if opts['use_primary_as_fsz']:
+			file_img_list_fullsize = file_img_list
 		try:
 			fs_file = open(file_img_list_fullsize)
 			fs_list = fs_file.read().split()
 
-			# set up the table header before the actual content
-			if opts['output_section_head'] and opts['output_as_table']:
+			# set up the table header title before the actual content
+			if opts['output_as_table'] and opts['output_table_titles']:
 				output.write('[table=100%][tr][td={1}][bg={2}][align=center][font={4}][size=5][color={3}]'
 							'[b]{0}[/b][/color][/size][/font][/align][/bg][/td][/tr][/table]'
 							.format(opts['tFullSizeSS'], opts['cTHBD'], opts['cTHBG'], opts['cTHF'], opts['fTH']))
@@ -437,18 +463,18 @@ def format_final_output(items, source):
 
 	# output the corresponding command-line options if we are doing an all_layouts loop, for easy reference
 	if opts['all_layouts'] and layouts_busy:
-		options = ''
+		command_line_options = ''
 		if not opts['output_as_table']:
-			options += '-l '
+			command_line_options += '-l '
 		if not opts['embed_images']:
-			options += '-u '
+			command_line_options += '-u '
 		if not opts['whole_filename_is_link']:
-			options += '-t '
+			command_line_options += '-t '
 
-		output.write('\n\nCommand-line options: [size=3][b]{}[/b][/size]\n\n'.format(options))
+		output.write('\n\nCommand-line options: [size=3][b]{}[/b][/size]\n\n'.format(command_line_options))
 
 	# if we choose to output the data as a table, we need to set up the table header before the data first row
-	if opts['output_section_head'] and opts['output_as_table']:
+	if opts['output_as_table'] and opts['output_table_titles']:
 		output.write('[table=100%][tr][td={1}][bg={2}][align=center][font={4}][size=5][color={3}]'
 					'[b]{0}[/b][/color][/size][/font][/align][/bg][/td][/tr][/table]'
 					.format(opts['tFileDetails'], opts['cTHBD'], opts['cTHBG'], opts['cTHF'], opts['fTH']))
@@ -512,7 +538,7 @@ def format_final_output(items, source):
 
 	# process the image-sets we split-off earlier, and create a separate table/list for them at the bottom
 	if imagesets:
-		if opts['output_section_head'] and opts['output_as_table']:
+		if opts['output_as_table'] and opts['output_table_titles']:
 			output.write('\n[table=100%][tr][td={1}][bg={2}][align=center][font={4}][size=5][color={3}]'
 						'[b]{0}[/b][/color][/size][/font][/align][/bg][/td][/tr][/table]'
 						.format(opts['tImageSets'], opts['cTHBD'], opts['cTHBG'], opts['cTHF'], opts['fTH']))
@@ -1097,8 +1123,8 @@ def get_screenshot_hash(filename, filepath, algorithm, strlen):
 			search_variants.append(filename_variant + ss_ext)
 
 	# all the directories we should traverse when searching for images (case-sensitive Unix is a PITA again)
-	common_ss_subdirs = ['ss', 'screens', 'screenshots', 'th', 'thumbs', 'thumbnails',
-						'SS', 'Screens', 'Screenshots', 'TH', 'Thumbs', 'Thumbnails']
+	common_ss_subdirs = ['ss', 'scr', 'screens', 'screenshots', 'th', 'thumbs', 'thumbnails',
+						'SS', 'SCR', 'Screens', 'Screenshots', 'TH', 'Thumbs', 'Thumbnails']
 	search_dirs = [filepath]  # same path as the actual video file, so the image would be in the same dir
 
 	for ss_subdir in common_ss_subdirs:
@@ -1133,7 +1159,7 @@ def get_screenshot_hash(filename, filepath, algorithm, strlen):
 		try:
 			img = open(ss_found, 'rb').read()
 		except (IOError, OSError):
-			print('ERROR: couldn\'t open the following image to calculate hash: {}'.format(ss_found))
+			print('ERROR: Couldn\'t open the following image to calculate hash: {}'.format(ss_found))
 			return None
 		if 'md5' in algorithm:
 			print('calculating MD5 hash for: {}'.format(ss_found))
@@ -1362,6 +1388,7 @@ def generate_all_layouts(items, source):
 	Hijacks the output function and runs it multiple times with differing settings to generate all possible layouts.
 	"""
 	global opts, layouts_busy, layouts_last
+	original_opts = opts
 	layouts_busy = True
 	layouts_last = False
 
@@ -1403,45 +1430,52 @@ def generate_all_layouts(items, source):
 	format_final_output(items, source)
 
 	layouts_busy = False
+	opts = original_opts
 
 
-def save_config(file):
+def save_config_file(file):
 	print('Saving config to: {}'.format(file))
 
-	with open(file, 'w', encoding='utf-8') as stream:
-		stream.write('# Config file for MediaToBBCode.py\n')
-		combined_opts = OrderedDict([('iopts', iopts), ('oopts', oopts), ('dopts', dopts)])
-		yaml.dump(combined_opts, stream, default_flow_style=False)
+	# use the structure of 'config', but use the values of 'opts'
+	simplified_config = deepcopy(config)
+
+	try:
+		for key, group in simplified_config.items():
+			for opt in group:
+				simplified_config[key][opt] = opts[opt]
+
+	except (KeyError, IndexError) as error:
+		print('ERROR: mismatch for option: {}'.format(error))
+		return
+
+	try:
+		with open(file, 'w', encoding='utf-8') as stream:
+			stream.write('# Config file for MediaToBBCode.py\n')
+			yaml.dump(simplified_config, stream, default_flow_style=False)
+
+	except (IOError, OSError):
+		print('ERROR: Couldn\'t save config file: {}'.format(file))
 
 
-def load_config(file):
-	global iopts, oopts, dopts
+def load_config_file(file):
+	global opts
 	print('Loading config from: {}'.format(file))
 
 	try:
 		with open(os.path.normpath(os.path.expanduser(file))) as stream:
 			try:
-				config = yaml.safe_load(stream)
-				if not config:
+				config_file = yaml.safe_load(stream)
+				if not config_file:
 					print('ERROR: empty or corrupt config file!')
 					return
 
 				try:
-					for section, options in config.items():
-						if section == 'iopts':
-							for opt, values in options.items():
-								iopts[opt][0] = values[0]
-						elif section == 'oopts':
-							for opt, values in options.items():
-								oopts[opt][0] = values[0]
-						elif section == 'dopts':
-							for opt, values in options.items():
-								dopts[opt][0] = values[0]
-						else:
-							print('ERROR: improperly formatted config file detected!')
-							break
+					for key, group in config.items():
+						for opt in group:
+							opts[opt] = config_file[key][opt]
+
 				except (KeyError, IndexError) as error:
-					print('ERROR: unknown option: {}'.format(error))
+					print('ERROR: missing option: {}'.format(error))
 					return
 
 			except yaml.YAMLError as error:
@@ -1494,315 +1528,536 @@ class ImageSet(object):
 		self.resolution = resolution
 
 
-class GUI:
+# noinspection PyArgumentList,PyUnresolvedReferences,PyCallByClass,PyTypeChecker
+class QtGUI(QMainWindow):
+	def __init__(self):
+		super().__init__()
+
+		self.widgets = {}  # dictionary of some mutable widgets, for easier manipulation
+		self.parse_thread = None  # defined here just to appease PEP
+
+		central_widget = QWidget(self)
+		central_layout = QGridLayout(central_widget)
+
+		# INPUT OPTIONS
+		frame_iops = QGroupBox('Input options', central_widget)
+		layout_iops = QGridLayout(frame_iops)
+
+		label_mdir = QLabel(config['iopts']['media_dir'][1], frame_iops)
+		label_mdir.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+		layout_iops.addWidget(label_mdir, 0, 0)
+
+		label_odir = QLabel(config['iopts']['output_dir'][1], frame_iops)
+		label_odir.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+		layout_iops.addWidget(label_odir, 1, 0)
+
+		self.widgets['media_dir'] = QLineEdit(frame_iops)
+		self.widgets['media_dir'].editingFinished.connect(self.update_gui_mopts)
+		layout_iops.addWidget(self.widgets['media_dir'], 0, 1)
+
+		self.widgets['output_dir'] = QLineEdit(frame_iops)
+		self.widgets['output_dir'].editingFinished.connect(self.update_gui_mopts)
+		layout_iops.addWidget(self.widgets['output_dir'], 1, 1)
+
+		button_mdir = QPushButton('Browse', frame_iops)
+		button_mdir.clicked.connect(lambda event: self.select_dir('media_dir'))
+		layout_iops.addWidget(button_mdir, 0, 2)
+
+		button_odir = QPushButton('Browse', frame_iops)
+		button_odir.clicked.connect(lambda event: self.select_dir('output_dir'))
+		layout_iops.addWidget(button_odir, 1, 2)
+
+		self.widgets['recursive'] = QCheckBox(config['iopts']['recursive'][1], frame_iops)
+		self.widgets['recursive'].stateChanged.connect(self.update_gui_oopts)
+		self.widgets['recursive'].stateChanged.connect(self.update_gui_mopts)
+		layout_iops.addWidget(self.widgets['recursive'], 0, 3)
+
+		self.widgets['parse_zip'] = QCheckBox(config['iopts']['parse_zip'][1], frame_iops)
+		self.widgets['parse_zip'].stateChanged.connect(self.update_gui_oopts)
+		layout_iops.addWidget(self.widgets['parse_zip'], 1, 3)
+
+		central_layout.addWidget(frame_iops, 0, 0)
+
+		# TABS
+		tabs = QTabWidget(central_widget)
+
+		# OUTPUT OPTIONS
+		tab_oopts = QWidget(tabs)
+		layout_oopts = QGridLayout(tab_oopts)
+
+		row = 0
+		for oopt, values in config['oopts'].items():
+			self.widgets[oopt] = QCheckBox(values[1], tab_oopts)
+			self.widgets[oopt].stateChanged.connect(self.update_gui_oopts)
+			layout_oopts.addWidget(self.widgets[oopt], row, 0)
+
+			# separators
+			if 'output_table_titles' in oopt or 'output_separators' in oopt or 'suppress_img_warnings' in oopt:
+				row += 1
+				line = QFrame(tab_oopts)
+				line.setFrameShape(QFrame.HLine)
+				line.setFrameShadow(QFrame.Sunken)
+				layout_oopts.addWidget(line, row, 0)
+
+			# disable/enable the image-list options based on this (and 'recursive')
+			if 'output_individual' in oopt:
+				self.widgets[oopt].stateChanged.connect(self.update_gui_mopts)
+
+			row += 1
+
+		tabs.addTab(tab_oopts, 'Output options')
+
+		# IMAGE-LIST OPTIONS
+		tab_mopts = QWidget(tabs)
+		layout_mopts = QGridLayout(tab_mopts)
+
+		note_mopts = QGroupBox('Note', tab_mopts)
+		layout_note_mopts = QGridLayout(note_mopts)
+
+		label_mopts = 'You do not need to use these options if your image-list files are set correctly (see ' \
+			'documentation), because the script will automatically look for the appropriate .txt files. ' \
+			'But you can manually specify them here if the automatic feature doesn\'t work for you.'
+		self.label_mopts = QLabel(label_mopts, note_mopts)
+		self.label_mopts.setWordWrap(True)
+		layout_note_mopts.addWidget(self.label_mopts)
+
+		label_mopts_disabled = 'You are using the option to output each directory as an individual file. ' \
+			'This means you will have to rely on the automated script. It will try to find the correct image-list ' \
+			'files for each directory. Carefully check the output log for potential problems.'
+		self.label_mopts_disabled = QLabel(label_mopts_disabled, note_mopts)
+		self.label_mopts_disabled.setWordWrap(True)
+		self.label_mopts_disabled.setVisible(True)
+		layout_note_mopts.addWidget(self.label_mopts_disabled)
+
+		layout_mopts.addWidget(note_mopts, 0, 0, 1, 2)
+
+		self.imagelist_buttons = {}
+		row = 1
+		for mopt, values in config['mopts'].items():
+			if 'string' in values[1]:
+				label = QLabel(values[2] + ':', tab_mopts)
+				layout_mopts.addWidget(label, row, 0)
+				row += 1
+
+				self.widgets[mopt] = QLineEdit(tab_mopts)
+				layout_mopts.addWidget(self.widgets[mopt], row, 0)
+
+				self.imagelist_buttons[mopt] = QPushButton('Browse', tab_mopts)
+				self.imagelist_buttons[mopt].clicked.connect(lambda event, opt=mopt: self.select_file(opt))
+				layout_mopts.addWidget(self.imagelist_buttons[mopt], row, 1)
+
+			elif 'bool' in values[1]:
+				self.widgets[mopt] = QCheckBox(values[2], tab_mopts)
+				self.widgets[mopt].stateChanged.connect(self.update_gui_mopts)
+				layout_mopts.addWidget(self.widgets[mopt], row, 0)
+
+			# separators
+			if 'imagelist_alt' in mopt:
+				row += 1
+				line = QFrame(tab_oopts)
+				line.setFrameShape(QFrame.HLine)
+				line.setFrameShadow(QFrame.Sunken)
+				layout_mopts.addWidget(line, row, 0, 1, 2)
+
+			row += 1
+
+		self.tab_mopts = tab_mopts  # so we can disable the entire tab easily
+		tabs.addTab(tab_mopts, 'Image lists')
+
+		# DISPLAY OPTIONS
+		tab_dopts = QWidget(tabs)
+		layout_dopts = QGridLayout(tab_dopts)
+
+		self.color_buttons = {}
+		row = 0
+		for dopt, values in config['dopts'].items():
+			self.widgets[dopt] = QLineEdit(tab_dopts)
+			layout_dopts.addWidget(self.widgets[dopt], row, 1)
+
+			label = QLabel(values[2], tab_dopts)
+			layout_dopts.addWidget(label, row, 2)
+
+			if values[1] == 'color':
+				self.color_buttons[dopt] = QPushButton(tab_dopts)
+				self.color_buttons[dopt].clicked.connect(lambda event, opt=dopt: self.pick_color(opt))
+				self.widgets[dopt].editingFinished.connect(lambda opt=dopt: self.update_gui_dopts(opt))
+				layout_dopts.addWidget(self.color_buttons[dopt], row, 0)
+
+			row += 1
+
+		tabs.addTab(tab_dopts, 'Display options')
+
+		# SAVE/LOAD CONFIG
+		tab_config = QWidget(tabs)
+		layout_config = QHBoxLayout(tab_config)
+
+		button_save = QPushButton('Save Config', tab_config)
+		button_save.clicked.connect(self.save_config)
+		button_load = QPushButton('Load Config', tab_config)
+		button_load.clicked.connect(self.load_config)
+		button_reset = QPushButton('Reset Config', tab_config)
+		button_reset.clicked.connect(self.reset_config)
+
+		layout_config.addStretch()
+		layout_config.addWidget(button_save)
+		layout_config.addWidget(button_load)
+		layout_config.addWidget(button_reset)
+		layout_config.addStretch()
+
+		tabs.addTab(tab_config, 'Save/Load config')
+
+		# ABOUT
+		tab_about = QWidget(tabs)
+		layout_about = QGridLayout(tab_about)
+
+		script_display = QLabel(script, tab_about)
+		script_font = QFont()
+		script_font.setPointSize(20)
+		script_display.setFont(script_font)
+		script_display.setAlignment(Qt.AlignCenter | Qt.AlignVCenter)
+		script_display.mousePressEvent = lambda event: self.visit_website(script_url)
+		layout_about.addWidget(script_display, 1, 1, 1, 2)
+
+		author_label = QLabel('author:', tab_about)
+		author_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+		layout_about.addWidget(author_label, 2, 1)
+
+		author_content = QLabel(author, tab_about)
+		author_content.mousePressEvent = lambda event: self.visit_website(author_url)
+		layout_about.addWidget(author_content, 2, 2)
+
+		version_label = QLabel('version:', tab_about)
+		version_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+		layout_about.addWidget(version_label, 3, 1)
+
+		version_content = QLabel(version, tab_about)
+		layout_about.addWidget(version_content, 3, 2)
+
+		compile_label = QLabel('compile date:', tab_about)
+		compile_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+		layout_about.addWidget(compile_label, 4, 1)
+
+		compile_content = QLabel(compile_date, tab_about)
+		layout_about.addWidget(compile_content, 4, 2)
+
+		layout_about.setColumnStretch(0, 10)
+		layout_about.setColumnStretch(3, 10)
+		layout_about.setRowStretch(0, 5)
+		layout_about.setRowStretch(5, 10)
+		tabs.addTab(tab_about, 'About')
+
+		# FINISH TABS
+		tabs.setCurrentIndex(0)
+		tabs.setTabShape(QTabWidget.Rounded)
+		central_layout.addWidget(tabs, 1, 0)
+
+		# MASTER BUTTON(S)
+		frame_run = QWidget(central_widget)
+		layout_run = QHBoxLayout(frame_run)
+
+		self.button_run = QPushButton('Run', frame_run)
+		self.button_run.clicked.connect(self.run_start)
+
+		layout_run.addStretch()
+		layout_run.addWidget(self.button_run)
+		layout_run.addStretch()
+		central_layout.addWidget(frame_run, 2, 0)
+
+		# LOG WINDOW
+		self.log_text = QPlainTextEdit()
+		log_font = QFont('Monospace', 8)
+		log_font.setStyleHint(QFont.TypeWriter)
+		self.log_text.setFont(log_font)
+		self.log_text.setPlaceholderText('Started GUI.')
+		self.log_text.setReadOnly(True)
+		# self.log_text.setLineWrapMode(QPlainTextEdit.NoWrap)
+		self.log_text.ensureCursorVisible()
+		central_layout.addWidget(self.log_text, 3, 0)
+
+		# MAIN GUI OPTIONS
+		self.setWindowTitle(script)
+		self.setWindowIcon(QIcon(resource_path('icon.ico')))
+		self.resize(600, 660)
+		self.setMinimumSize(500, 600)
+		self.setAnimated(False)
+
+		central_layout.setRowStretch(0, 0)
+		central_layout.setRowStretch(1, 0)
+		central_layout.setRowStretch(2, 0)
+		central_layout.setRowStretch(3, 10)
+		self.setCentralWidget(central_widget)
+
+		# SET INITIAL STATE
+		self.initializing = True  # prevent event emitters from going crazy during GUI initialization
+		self.set_gui_values()
+		self.initializing = False
+		self.update_gui_oopts()
+		self.update_gui_mopts()
+		self.update_gui_dopts()
+
+		# REDIRECT STDOUT
+		sys.stdout = QtGUI.StdoutRedirector(writeSignal=self.log_append)
+		sys.stderr = QtGUI.StdoutRedirector(writeSignal=self.log_append)
+
+	def set_gui_values(self):
+		for opt, widget in self.widgets.items():
+			if isinstance(widget, QLineEdit):
+				self.widgets[opt].setText(opts[opt])
+			elif isinstance(widget, QCheckBox):
+				self.widgets[opt].setChecked(opts[opt])
+
+	def get_gui_values(self):
+		global opts
+
+		for opt, widget in self.widgets.items():
+			if isinstance(widget, QLineEdit):
+				if widget.isEnabled():
+					opts[opt] = widget.text()
+				else:
+					opts[opt] = ''
+			elif isinstance(widget, QCheckBox):
+				if widget.isEnabled():
+					opts[opt] = widget.isChecked()
+				else:
+					opts[opt] = False
+
+	@pyqtSlot()
+	def update_gui_oopts(self):
+		if self.initializing:
+			return
+
+		if self.widgets['recursive'].isChecked():
+			self.widgets['output_individual'].setDisabled(False)
+			self.widgets['output_separators'].setDisabled(False)
+		else:
+			self.widgets['output_individual'].setDisabled(True)
+			self.widgets['output_separators'].setDisabled(True)
+
+		if self.widgets['output_individual'].isChecked() or not self.widgets['recursive'].isChecked():
+			self.widgets['output_separators'].setDisabled(True)
+		else:
+			self.widgets['output_separators'].setDisabled(False)
+
+		if self.widgets['output_as_table'].isChecked():
+			self.widgets['output_table_titles'].setDisabled(False)
+		else:
+			self.widgets['output_table_titles'].setDisabled(True)
+
+		if self.widgets['embed_images'].isChecked():
+			self.widgets['output_bbcode_thumb'].setDisabled(False)
+		else:
+			self.widgets['output_bbcode_thumb'].setDisabled(True)
+
+	@pyqtSlot()
+	def update_gui_mopts(self):
+		if self.initializing:
+			return
+
+		media_dir = self.widgets['media_dir'].text()
+		output_dir = self.widgets['output_dir'].text()
+
+		if self.widgets['recursive'].isChecked() \
+			and self.widgets['recursive'].isEnabled() \
+			and self.widgets['output_individual'].isChecked():
+			self.tab_mopts.setDisabled(True)
+			self.label_mopts.setVisible(False)
+			self.label_mopts_disabled.setVisible(True)
+		else:
+			self.tab_mopts.setDisabled(False)
+			self.label_mopts.setVisible(True)
+			self.label_mopts_disabled.setVisible(False)
+
+		if self.widgets['use_imagelist_fsz'].isChecked():
+			self.widgets['use_primary_as_fsz'].setDisabled(False)
+		else:
+			self.widgets['use_primary_as_fsz'].setDisabled(True)
+
+		if self.widgets['use_imagelist_fsz'].isChecked() and not self.widgets['use_primary_as_fsz'].isChecked():
+			self.widgets['imagelist_fsz'].setDisabled(False)
+			self.imagelist_buttons['imagelist_fsz'].setDisabled(False)
+		else:
+			self.widgets['imagelist_fsz'].setDisabled(True)
+			self.imagelist_buttons['imagelist_fsz'].setDisabled(True)
+
+		if not output_dir and not media_dir:
+			base = ''
+		elif not output_dir:
+			base = os.path.normpath(os.path.join(media_dir, os.path.basename(media_dir)))
+		else:
+			base = os.path.normpath(os.path.join(output_dir, os.path.basename(media_dir)))
+
+		self.widgets['imagelist_pri'].setPlaceholderText(base + '.txt')
+		self.widgets['imagelist_alt'].setPlaceholderText(base + '_alt.txt')
+		self.widgets['imagelist_fsz'].setPlaceholderText(base + '_fullsize.txt')
+
+	@pyqtSlot()
+	@pyqtSlot(str)
+	def update_gui_dopts(self, dopt=None):
+		if self.initializing:
+			return
+
+		if dopt:
+			buttons = {dopt: self.color_buttons[dopt]}
+		else:
+			buttons = self.color_buttons
+
+		for opt, button in buttons.items():
+			value = self.get_color(self.widgets[opt].text())
+			if value:
+				self.color_buttons[opt].setStyleSheet('background-color: {}'.format(value['color']))
+			else:
+				self.color_buttons[opt].setStyleSheet('')
+
+	@pyqtSlot(str)
+	def pick_color(self, dopt):
+		old_value = self.widgets[dopt].text()
+		old_color = QColor()
+		the_rest = ''
+
+		if old_value:
+			old_value = self.get_color(old_value)
+			if old_value:
+				old_color.setNamedColor(old_value['color'])
+				the_rest = old_value['the_rest'].strip()
+
+		new_color = QColorDialog.getColor(old_color)
+
+		if new_color.isValid():
+			self.widgets[dopt].setText((new_color.name().upper() + ' ' + the_rest).strip())
+			self.update_gui_dopts(dopt)
+
+	@staticmethod
+	def get_color(string):
+		match = re.search(r'#(?:[0-9a-fA-F]{1,2}){3}', string)
+		if match:
+			the_rest = string.replace(match.group(0), '')
+			return {'color': match.group(0), 'the_rest': the_rest}
+		else:
+			return False
+
+	@pyqtSlot(str)
+	def visit_website(self, url):
+		webbrowser.open(url, new=2)
+
+	@pyqtSlot(str)
+	def select_dir(self, opt):
+		directory = QFileDialog.getExistingDirectory()
+
+		if directory:
+			self.widgets[opt].setText(directory)
+			if 'media_dir' in opt or 'output_dir' in opt:
+				self.update_gui_mopts()
+
+	@pyqtSlot(str)
+	def select_file(self, opt):
+		file = QFileDialog.getOpenFileName()[0]
+
+		if file:
+			self.widgets[opt].setText(file)
+
+	@pyqtSlot()
+	def save_config(self):
+		caption = 'Save config file'
+		initial_dir = os.path.join(self.widgets['output_dir'].text(), 'mediatobbcode-config.yml')
+		filters = 'YAML Files (*.yml *.yaml);;All Files (*.*)'
+		selected_filter = 'YAML Files (*.yml *.yaml)'
+		file = QFileDialog.getSaveFileName(self, caption, initial_dir, filters, selected_filter)[0]
+
+		if file:
+			self.get_gui_values()
+			save_config_file(file)
+
+	@pyqtSlot()
+	def load_config(self):
+		caption = 'Load config file'
+		initial_dir = os.path.join(self.widgets['output_dir'].text(), 'mediatobbcode-config.yml')
+		filters = 'YAML Files (*.yml *.yaml);;All Files (*.*)'
+		selected_filter = 'YAML Files (*.yml *.yaml)'
+		file = QFileDialog.getOpenFileName(self, caption, initial_dir, filters, selected_filter)[0]
+
+		if file:
+			success = load_config_file(file)
+			if success:
+				self.initializing = True
+				self.set_gui_values()
+				self.initializing = False
+				self.update_gui_oopts()
+				self.update_gui_mopts()
+				self.update_gui_dopts()
+
+	@pyqtSlot()
+	def reset_config(self):
+		self.initializing = True
+		populate_opts()
+		self.set_gui_values()
+		self.initializing = False
+		self.update_gui_oopts()
+		self.update_gui_mopts()
+		self.update_gui_dopts()
+
+	@pyqtSlot()
+	def run_start(self):
+		self.get_gui_values()
+		self.log_text.clear()
+
+		self.parse_thread = QtGUI.ParseThread()
+		self.parse_thread.finished.connect(self.run_finish)
+		self.parse_thread.start()
+
+		self.button_run.setText('Stop')
+		self.button_run.clicked.disconnect()
+		self.button_run.clicked.connect(self.run_terminate)
+
+	@pyqtSlot()
+	def run_finish(self):
+		self.button_run.setText('Run')
+		self.button_run.clicked.disconnect()
+		self.button_run.clicked.connect(self.run_start)
+
+	@pyqtSlot()
+	def run_terminate(self):
+		if self.parse_thread.isRunning():
+			self.parse_thread.terminate()
+			print('Thread terminated!')
+
+	@pyqtSlot(str)
+	def log_append(self, text):
+		self.log_text.moveCursor(QTextCursor.End)
+		self.log_text.insertPlainText(text)
+
+	class ParseThread(QThread):
+		def __init__(self):
+			super().__init__()
+
+		def run(self):
+			try:
+				set_paths_and_run()
+			except:
+				(errortype, value, traceback) = sys.exc_info()
+				sys.excepthook(errortype, value, traceback)
+				self.exit()
 
 	# redirect stdout (print) to a widget
-	class StdoutRedirector(object):
-		def __init__(self, widget):
-			self.widget = widget
+	# adapted from http://stackoverflow.com/questions/22581496/error-in-pyqt-qthread-not-printed
+	class StdoutRedirector(QObject):
+		writeSignal = pyqtSignal(str)
 
-		def write(self, line):
-			self.widget.insert(END, line)
-			self.widget.see(END)
+		def write(self, text):
+			self.writeSignal.emit(str(text))
 
 		def flush(self):
 			pass
 
-	def __init__(self, root):
-		root.title('MediaToBBCode.py')
-		root.minsize(width=450, height=500)
-		if "nt" == os.name:
-			root.iconbitmap(default=resource_path('icon.ico'))
-		padding = 6
-		self.widgets = {}  # dictionary of some mutable widgets, for easier manipulation
-
-		# input options
-		frame1 = ttk.LabelFrame(root, text='Input options', padding=padding)
-		frame1.pack(fill=X, expand=False, padx=padding, pady=padding)
-		frame1.columnconfigure(1, weight=1)
-
-		self.iopts = {}
-
-		for iopt, values in iopts.items():
-			if 'string' in values[1]:
-				self.iopts[iopt] = StringVar()
-			else:
-				self.iopts[iopt] = BooleanVar()
-
-		ttk.Label(frame1, text=iopts['media_dir'][2]).grid(row=0, column=0, sticky='E')
-		ttk.Label(frame1, text=iopts['output_dir'][2]).grid(row=1, column=0, sticky='E')
-
-		ttk.Entry(frame1, textvariable=self.iopts['media_dir']).grid(row=0, column=1, sticky='W, E')
-		ttk.Entry(frame1, textvariable=self.iopts['output_dir']).grid(row=1, column=1, sticky='W, E')
-
-		ttk.Button(frame1, text="Browse", command=self.select_mdir).grid(row=0, column=2)
-		ttk.Button(frame1, text="Browse", command=self.select_odir).grid(row=1, column=2)
-
-		ttk.Checkbutton(frame1, text=iopts['recursive'][2], variable=self.iopts['recursive'],
-						command=self.oopt_change).grid(row=0, column=3, sticky='W')
-
-		ttk.Checkbutton(frame1, text=iopts['parse_zip'][2], variable=self.iopts['parse_zip'],
-						command=self.oopt_change).grid(row=1, column=3, sticky='W')
-
-		# notebook to create tabs
-		tabs = ttk.Notebook(root)
-
-		# output options
-		frame2a = ttk.Frame(tabs, padding=padding)
-		self.oopts = {}
-		oopts_row = 0
-
-		for oopt, values in oopts.items():
-			self.oopts[oopt] = BooleanVar()
-			self.widgets[oopt] = ttk.Checkbutton(frame2a, text=values[2], variable=self.oopts[oopt])
-			self.widgets[oopt].config(command=self.oopt_change)
-			self.widgets[oopt].grid(row=oopts_row, column=0, sticky='W')
-
-			oopts_row += 1
-
-		# styling options
-		frame2b = ttk.Frame(tabs, padding=padding)
-		self.dopts = {}
-		self.dummy_img = PhotoImage(width=14, height=14)  # creates square buttons
-		self.dummy_btn = Button(frame2b, image=self.dummy_img)  # used for default bg color
-		dopts_row = 0
-
-		for dopt, values in dopts.items():
-			self.dopts[dopt] = StringVar()
-			e = ttk.Entry(frame2b, textvariable=self.dopts[dopt])
-			e.bind('<FocusOut>', lambda event, opt=dopt: self.dopt_change(event, opt))
-			e.grid(row=dopts_row, column=1, padx=3)
-
-			ttk.Label(frame2b, text=values[2]).grid(row=dopts_row, column=2, sticky='W')
-
-			if values[1] == 'color':
-				self.widgets[dopt] = Button(frame2b, image=self.dummy_img)
-				self.widgets[dopt].bind('<ButtonRelease-1>', lambda event, opt=dopt: self.pick_color(event, opt))
-				self.widgets[dopt].grid(row=dopts_row, column=0)
-
-			dopts_row += 1
-
-		# load/save config
-		frame2c = ttk.Frame(tabs, padding=padding)
-		frame2c.columnconfigure(0, weight=1)
-		frame2c.columnconfigure(1, weight=1)
-		frame2c.rowconfigure(0, weight=1)
-
-		ttk.Button(frame2c, text="Save Config", command=self.save_config).grid(row=0, column=0, sticky=E, padx=padding)
-		ttk.Button(frame2c, text="Load Config", command=self.load_config).grid(row=0, column=1, sticky=W, padx=padding)
-
-		# about
-		frame2d = ttk.Frame(tabs, padding=40)
-		frame2d.columnconfigure(0, weight=1)
-		frame2d.columnconfigure(1, weight=1)
-
-		script_font = font.Font(size=12, weight='bold')
-		script_display = ttk.Label(frame2d, text=script, font=script_font)
-		script_display.bind('<Button-1>', lambda event: self.visit_website(event, script_url))
-		script_display.grid(row=0, column=0, columnspan=2)
-
-		ttk.Label(frame2d, text='author:').grid(row=1, column=0, sticky=E)
-		author_link = ttk.Label(frame2d, text=author)
-		author_link.bind('<Button-1>', lambda event: self.visit_website(event, author_url))
-		author_link.grid(row=1, column=1, sticky=W)
-
-		ttk.Label(frame2d, text='version:').grid(row=2, column=0, sticky=E)
-		ttk.Label(frame2d, text=version).grid(row=2, column=1, sticky=W)
-
-		ttk.Label(frame2d, text='compile date:').grid(row=3, column=0, sticky=E)
-		ttk.Label(frame2d, text=compile_date).grid(row=3, column=1, sticky=W)
-
-		# fill the tabs
-		tabs.add(frame2a, text='Output options')
-		tabs.add(frame2b, text='Styling options')
-		tabs.add(frame2c, text='Save/Load config')
-		tabs.add(frame2d, text='About')
-		tabs.pack(fill=X, expand=False, padx=padding, pady=padding)
-
-		# master button(s)
-		frame3 = ttk.Frame(root, padding=padding)
-		frame3.pack(expand=False)
-
-		self.run_button = ttk.Button(frame3, text="RUN", command=lambda run=True: self.set_options(run))
-		self.run_button.pack()
-
-		# log window
-		frame4 = ttk.Frame(root)
-		frame4.pack(fill=BOTH, expand=True, padx=5, pady=5)
-		frame4.columnconfigure(0, weight=1)
-		frame4.rowconfigure(0, weight=1)
-
-		log_font = font.nametofont('TkFixedFont').config(size=8)
-		self.log_text = scrolledtext.ScrolledText(frame4, height=9, font=log_font, state=DISABLED)
-		self.log_text.grid(row=0, column=0, sticky=(N, S, E, W))
-
-		sys.stdout = GUI.StdoutRedirector(self.log_text)
-
-		# set initial state
-		self.get_options()
-		self.oopt_change()
-		self.dopt_change()
-
-	def select_mdir(self):
-		directory = filedialog.askdirectory(title='Select media directory', initialdir=self.iopts['media_dir'])
-		self.iopts['media_dir'].set(directory)
-
-	def select_odir(self):
-		directory = filedialog.askdirectory(title='Select output directory', initialdir=self.iopts['output_dir'])
-		self.iopts['output_dir'].set(directory)
-
-	def oopt_change(self):
-		if self.iopts['recursive'].get():
-			self.widgets['output_individual'].config(state=NORMAL)
-			self.widgets['output_separators'].config(state=NORMAL)
-		else:
-			self.widgets['output_individual'].config(state=DISABLED)
-			self.widgets['output_separators'].config(state=DISABLED)
-
-		if self.oopts['output_individual'].get() or not self.iopts['recursive'].get():
-			self.widgets['output_separators'].config(state=DISABLED)
-		else:
-			self.widgets['output_separators'].config(state=NORMAL)
-
-		if self.oopts['output_as_table'].get():
-			self.widgets['output_section_head'].config(state=NORMAL)
-		else:
-			self.widgets['output_section_head'].config(state=DISABLED)
-
-		if self.oopts['embed_images'].get():
-			self.widgets['output_bbcode_thumb'].config(state=NORMAL)
-		else:
-			self.widgets['output_bbcode_thumb'].config(state=DISABLED)
-
-	def dopt_change(self, event=None, dopt=None):
-		if dopt:
-			# single display option widget
-			try:
-				widgets_to_update = {dopt: self.widgets[dopt]}
-			except KeyError:
-				return
-		else:
-			# all display option widgets
-			widgets_to_update = self.widgets
-
-		for dopt, widget in widgets_to_update.items():
-			if isinstance(widget, Button):
-				color = self.dopts[dopt].get()
-				new_color = self.validate_color(color)
-				if new_color:
-					widget.config(bg=new_color[0], activebackground=new_color[0])
-				else:
-					no_bg = self.dummy_btn.cget('bg')
-					widget.config(bg=no_bg, activebackground=no_bg)
-
-	def pick_color(self, event, dopt):
-		old_color = self.dopts[dopt].get()
-		the_rest = ''
-		if not old_color:
-			# empty string or not initialized
-			old_color = '#FFF'
-		else:
-			old_color = self.validate_color(old_color)
-			if old_color:
-				the_rest = old_color[1].strip()
-				old_color = old_color[0]
-			else:
-				old_color = '#FFF'
-
-		# get new hex color
-		new_color = colorchooser.askcolor(initialcolor=old_color)[1]
-		if new_color:
-			new_color = self.validate_color(new_color)
-			if new_color:
-				self.dopts[dopt].set((new_color[0].upper() + ' ' + the_rest).strip())
-				self.dopt_change(None, dopt)
-
-	@staticmethod
-	def validate_color(string):
-		match = re.search(r'#(?:[0-9a-fA-F]{1,2}){3}', string)
-		if match:
-			the_rest = string.replace(match.group(0), '')
-			return [match.group(0), the_rest]
-		else:
-			return False
-
-	def save_config(self):
-		file_save_options = dict(title='Save config file',
-								initialdir=self.iopts['output_dir'],
-								initialfile='mediatobbcode-config.yml',
-								defaultextension='.yml',
-								filetypes=[('YAML Files', '*.yml;*.yaml'), ('All Files', '*')])
-		file = filedialog.asksaveasfilename(**file_save_options)
-		if file:
-			self.log_text.config(state=NORMAL)
-			self.set_options()
-			save_config(file)
-			self.log_text.config(state=DISABLED)
-
-	def load_config(self):
-		file_load_options = dict(title='Load config file',
-								initialdir=self.iopts['output_dir'],
-								filetypes=[('YAML Files', '*.yml;*.yaml'), ('All Files', '*')])
-		file = filedialog.askopenfilename(**file_load_options)
-		if file:
-			self.log_text.config(state=NORMAL)
-			success = load_config(file)
-			if success:
-				self.get_options()
-				self.oopt_change()
-				self.dopt_change()
-			self.log_text.config(state=DISABLED)
-
-	@staticmethod
-	def visit_website(event, url):
-		webbrowser.open(url, new=2)
-
-	def get_options(self):
-		for iopt in self.iopts:
-			self.iopts[iopt].set(iopts[iopt][0])
-
-		for oopt in self.oopts:
-			self.oopts[oopt].set(oopts[oopt][0])
-
-		for dopt in self.dopts:
-			self.dopts[dopt].set(dopts[dopt][0])
-
-	def set_options(self, run=False):
-		global iopts, oopts, dopts
-
-		for iopt in self.iopts:
-			iopts[iopt][0] = self.iopts[iopt].get()
-
-		for oopt in self.oopts:
-			oopts[oopt][0] = self.oopts[oopt].get()
-
-		for dopt in self.dopts:
-			dopts[dopt][0] = self.dopts[dopt].get()
-
-		if run:
-			# create a new tread for the actual processing, so the GUI won't freeze
-			Thread(target=self.run).start()
-
-	def run(self):
-		self.log_text.config(state=NORMAL)
-		self.run_button.config(state=DISABLED)
-		self.log_text.delete(1.0, END)
-
-		set_vars_and_run()
-
-		self.log_text.config(state=DISABLED)
-		self.run_button.config(state=NORMAL)
-
 
 def resource_path(relative_path):
 	"""
-	Get absolute path to resource, works for dev and for PyInstaller 3.2
+	Get absolute path to resources, works for dev and for PyInstaller 3.2
 	"""
 	try:
 		# PyInstaller creates a temp folder and stores path in _MEIPASS
 		base_path = sys._MEIPASS
 	except AttributeError:
-		base_path = os.path.abspath(".")
+		base_path = os.path.abspath('.')
 
 	return os.path.join(base_path, relative_path)
 
@@ -1811,8 +2066,10 @@ def main(argv):
 	"""
 	Process command-line inputs or load GUI
 	"""
-	global iopts, oopts, dopts
-	global debug_imghost_slugs
+	global opts, debug_imghost_slugs
+
+	# set the default opts as initial values
+	populate_opts()
 
 	h = 'mediatobbcode.py\n' \
 		'- use GUI to set options\n\n' \
@@ -1827,15 +2084,16 @@ def main(argv):
 		'For a full list of command-line options, see the online documentation.'
 
 	try:
-		options, args = getopt.getopt(argv, 'hm:o:rzlifbuntsawc:x',
-			['help', 'mediadir=', 'outputdir=', 'recursive', 'zip' 'list', 'individual', 'flat',
-			'bare', 'url', 'nothumb', 'tinylink', 'suppress', 'all', 'webhtml', 'config=', 'xdebug'])
+		options, args = getopt.getopt(argv, 'hm:o:rzlbifuntsawzc:x',
+			['help', 'mediadir=', 'outputdir=', 'recursive', 'zip', 'list', 'bare', 'individual', 'flat',
+			'url', 'nothumb', 'tinylink', 'suppress', 'all', 'webhtml', 'fullsize', 'config=', 'xdebug'])
 		if not options:
-			# create GUI to set variables
-			root = Tk()
-			GUI(root)
-			root.mainloop()
-			sys.exit()
+			# create GUI
+			app = QApplication(sys.argv)
+			gui = QtGUI()
+			gui.show()
+			sys.exit(app.exec_())
+			# Create thread that will listen on the other end of the queue, and send the text to the textedit in our application
 
 	except getopt.GetoptError:
 		print(h)
@@ -1847,37 +2105,41 @@ def main(argv):
 			sys.exit()
 
 		elif opt in ('-m', '--mediadir'):
-			iopts['media_dir'][0] = arg
+			opts['media_dir'] = arg
 		elif opt in ('-o', '--outputdir'):
-			iopts['output_dir'][0] = arg
+			opts['output_dir'] = arg
 		elif opt in ('-r', '--recursive'):
-			iopts['recursive'][0] = True
+			opts['recursive'] = True
 		elif opt in ('-z', '--zip'):
-			iopts['parse_zip'][0] = True
+			opts['parse_zip'] = True
 
 		elif opt in ('-l', '--list'):
-			oopts['output_as_table'][0] = False
-		elif opt in ('-i', '--individual'):
-			oopts['output_individual'][0] = True
-		elif opt in ('-f', '--flat'):
-			oopts['output_separators'][0] = False
+			opts['output_as_table'] = False
 		elif opt in ('-b', '--bare'):
-			oopts['output_section_head'][0] = False
+			opts['output_table_titles'] = False
+		elif opt in ('-i', '--individual'):
+			opts['output_individual'] = True
+		elif opt in ('-f', '--flat'):
+			opts['output_separators'] = False
+
 		elif opt in ('-u', '--url'):
-			oopts['embed_images'][0] = False
+			opts['embed_images'] = False
 		elif opt in ('-n', '--nothumb'):
-			oopts['output_bbcode_thumb'][0] = False
+			opts['output_bbcode_thumb'] = False
 		elif opt in ('-t', '--tinylink'):
-			oopts['whole_filename_is_link'][0] = False
+			opts['whole_filename_is_link'] = False
 		elif opt in ('-s', '--suppress'):
-			oopts['suppress_img_warnings'][0] = True
+			opts['suppress_img_warnings'] = True
+
+		elif opt in ('-z', '--fullsize'):
+			opts['use_imagelist_fsz'] = True
 		elif opt in ('-a', '--all'):
-			oopts['all_layouts'][0] = True
+			opts['all_layouts'] = True
 		elif opt in ('-w', '--webhtml'):
-			oopts['output_html'][0] = True
+			opts['output_html'] = True
 
 		elif opt in ('-c', '--config'):
-			success = load_config(arg)
+			success = load_config_file(arg)
 			if not success:
 				sys.exit()
 		elif opt in ('-x', '--xdebug'):
@@ -1886,7 +2148,7 @@ def main(argv):
 			sys.exit()
 
 	# initialize the script using the command-line arguments
-	set_vars_and_run()
+	set_paths_and_run()
 
 
 # hi there :)

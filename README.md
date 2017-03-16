@@ -15,6 +15,9 @@ It now comes with a simple GUI.
 
 ## Features
 - Easy GUI for those not wanting to use the command-line.
+    - Output formatting options (including display/styling options)
+    - Manual or automatic image-list selection.
+    - Save/load of configurations for easier reuse.
 - Parse local media files (recursively or not) using the MediaInfo lib.
 - Cleanup of media metadata.
 - Detect image-set ZIP archives and provide information on their contents.
@@ -25,10 +28,10 @@ It now comes with a simple GUI.
 
 #### Requirements
 These requirements only apply if you're using the python script. The executable GUI has all these packed.
-- Python 3.4+ (not compatible with Python 2.7+)
-- [MediaInfo](https://mediaarea.net/en/MediaInfo/Download)
-    - 32/64bit dll/lib must match Python environment
+- [Python 3.4+](https://www.python.org/downloads/)
+- [MediaInfo](https://mediaarea.net/en/MediaInfo/Download) (32/64bit dll/lib must match Python environment)
 - [pymediainfo](https://pypi.python.org/pypi/pymediainfo)
+- [PyQt5](https://riverbankcomputing.com/software/pyqt/intro) (if you wish to use the GUI)
 - [Pillow](https://python-pillow.org/) (if you wish to process image-sets)
 - [bbcode](https://pypi.python.org/pypi/bbcode/1.0.19) (if you wish to output as HTML)
 
@@ -36,9 +39,9 @@ For Ubuntu this would be something like:
 ````
 sudo apt install mediainfo    # MediaInfo library
 sudo apt install python3-pip  # python package manager
-sudo apt install python3-tk   # Tkinter for the GUI
 pip3 install pymediainfo      # python interface for MediaInfo
 pip3 install ruamel-yaml      # YAML interpreter for saving/loading configs
+pip3 install PyQt5            # if you wish to use the GUI
 pip3 install pillow           # if you wish to process image-sets
 pip3 install bbcode           # if you wish to output as HTML
 ````
@@ -68,7 +71,7 @@ pip3 install bbcode           # if you wish to output as HTML
 \* _These image-hosts are supported because they all share one important similarity: the file-names for the uploaded images are predictable and the slugs are reproducable offline. Without that, we wouldn't be able to match our output to the correct online images._
 
 \** _If you want to add an additional image-host as a backup in case the primary host goes down, simply add an extra txt containing the secondary host's output in a file with the `_alt` suffix (`my-clips_alt.txt` in this example).
-You can also add a higher-resolution image-list which will be displayed outside the table (thus being less constrained), by adding a file with the `_fullsize` suffix (`my-clips_fullsize.txt` in this example)._
+You can also add a higher-resolution image-list which will be displayed outside the table (thus being less constrained), by adding a file with the `_fullsize` suffix (`my-clips_fullsize.txt` in this example) and using the `-z` command-line option._
 
 #### Command-line example
 Files (using absolute paths in this example, but relative paths work equally well):
@@ -97,25 +100,28 @@ Output:
 ````
 
 ## Command-line options and arguments
-##### File processing
+##### Input options
 * `-m <path>` or `--mediadir <path>` The directory to use when looking for video files to process.
 * `-o <path>` or `--outputdir <path>` The output directory, where image-lists should be located, and `_output.txt` files are written. If `-o` isn't specified, the media-dir (`-m`) will act as output dir.
 * `-r` or `--recursive` Will enable recursive searching for media files. Meaning it will include all sub-directories of `-m`.
 * `-z` or `--zip` Will process all encountered ZIP archives as image-sets and provide information about their contents (number of images, image resolution, size, etc.)
 
-##### Output formatting
+##### Output options
 * `-l` or `--list` Generates a simpler (and uglier) list instead of a table. Use this if the BBCode engine on your website doesn't support `[table]` tags.
 * `-i` or `--individual` Generates a separate output file for each directory successfully traversed recursively (and named accordingly).
     * applies if: `--recursive`
 * `-f` or `--flat` Prevents the creation of separators (with the dir name) when switching directories in recursive mode.
     * applies if: `--recursive` and not `--individual`
-* `-b` or `--bare` Stops the table heading from being automatically generated. Use this if the BBCode engine on your website doesn't support `[table]` tags or if you simply don't like it.
+* `-b` or `--bare` Stops the table title heading from being automatically generated. Use this if the BBCode engine on your website doesn't support `[table]` tags or if you simply don't like it.
 * `-u` or `--url` Embeds a simple link to the full-sized image in the output, rather than a thumbnail (which links to the same image). Use this if the BBCode engine on your website doesn't support `[spoiler]` tags.
 * `-t` or `--tinylink` Instead of the whole file-name being a link to the full-sized image (or a `[spoiler]` tag), a smaller link to the same image will be inserted in the row instead.
 * `-n` or `--nothumb` Will force embedded images to be output using the `[img]` tag. Use this if the BBCode engine on your website doesn't support `[thumb]` tags. 
 * `-s` or `--suppress` Prevents warning messages from appearing in the output if no suitable image or image-link was found.
+* `-z` or `--fullsize` Will output all image-links located in the `_fullsize.txt` file in-line above the main content in a single `[spoiler]` tag.
 * `-a` or `--all` Will output all 7 different layout options below each other, easy for testing and picking your favorite. Note that this will include layouts with `[table]` and `[spoiler]` tags, so be careful if these aren't supported.
-* `-w` or `--webhtml` Will convert the final BBCode output to HTML. (experimental)
+* `-w` or `--webhtml` Will convert the final BBCode output to HTML and open your browser automatically to view the output.
+
+##### Other
 * `-c` or `--config <file>` Load settings from a previously saved config file.
 * `-x` or `--xdebug` For debugging image-host output slugs. Only for developers.
 

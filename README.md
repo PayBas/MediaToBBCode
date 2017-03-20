@@ -40,7 +40,6 @@ For Ubuntu this would be something like:
 sudo apt install mediainfo    # MediaInfo library
 sudo apt install python3-pip  # python package manager
 pip3 install pymediainfo      # python interface for MediaInfo
-pip3 install ruamel-yaml      # YAML interpreter for saving/loading configs
 pip3 install PyQt5            # if you wish to use the GUI
 pip3 install pillow           # if you wish to process image-sets
 pip3 install bbcode           # if you wish to output as HTML

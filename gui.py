@@ -6,8 +6,9 @@ import sys
 import webbrowser
 from PyQt5.QtCore import Qt, QObject, QThread, pyqtSignal, pyqtSlot
 from PyQt5.QtGui import QColor, QFont, QIcon, QTextCursor
-from PyQt5.QtWidgets import QMainWindow, QWidget, QGridLayout, QHBoxLayout, QGroupBox, QTabWidget, \
-	QLabel, QLineEdit, QPlainTextEdit, QCheckBox, QPushButton, QFrame, QFileDialog, QColorDialog
+from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QGridLayout, QHBoxLayout, QGroupBox, QTabWidget,
+	QLabel, QLineEdit, QPlainTextEdit, QCheckBox, QPushButton, QFrame, QFileDialog, QColorDialog, QMessageBox)
+from dottorrentGUI import gui as dott_gui
 import config
 import mediatobbcode
 
@@ -239,10 +240,14 @@ class QtGUI(QMainWindow):
 		frame_run = QWidget(central_widget)
 		layout_run = QHBoxLayout(frame_run)
 
+		self.button_torrent = QPushButton('Create Torrent', frame_run)
+		self.button_torrent.clicked.connect(self.create_torrent)
+
 		self.button_run = QPushButton('Run', frame_run)
 		self.button_run.clicked.connect(self.run_start)
 
 		layout_run.addStretch()
+		layout_run.addWidget(self.button_torrent)
 		layout_run.addWidget(self.button_run)
 		layout_run.addStretch()
 		central_layout.addWidget(frame_run, 2, 0)
@@ -290,15 +295,15 @@ class QtGUI(QMainWindow):
 			elif isinstance(widget, QCheckBox):
 				self.widgets[opt].setChecked(config.opts[opt])
 
-	def get_gui_values(self):
+	def get_gui_values(self, allow_disabled=False):
 		for opt, widget in self.widgets.items():
 			if isinstance(widget, QLineEdit):
-				if widget.isEnabled():
+				if widget.isEnabled() or allow_disabled:
 					config.opts[opt] = widget.text()
 				else:
 					config.opts[opt] = ''
 			elif isinstance(widget, QCheckBox):
-				if widget.isEnabled():
+				if widget.isEnabled() or allow_disabled:
 					config.opts[opt] = widget.isChecked()
 				else:
 					config.opts[opt] = False
@@ -443,10 +448,7 @@ class QtGUI(QMainWindow):
 	@pyqtSlot()
 	def save_config(self):
 		caption = 'Save config file'
-		# initial_dir = os.path.join(self.widgets['output_dir'].text(), 'mediatobbcode-config.yml')
 		initial_dir = ''
-		# filters = 'YAML Files (*.yml *.yaml);;All Files (*.*)'
-		# selected_filter = 'YAML Files (*.yml *.yaml)'
 		filters = 'INI Files (*.ini *.conf);;All Files (*.*)'
 		selected_filter = 'INI Files (*.ini *.conf)'
 		file = QFileDialog.getSaveFileName(self, caption, initial_dir, filters, selected_filter)[0]
@@ -458,10 +460,7 @@ class QtGUI(QMainWindow):
 	@pyqtSlot()
 	def load_config(self):
 		caption = 'Load config file'
-		# initial_dir = os.path.join(self.widgets['output_dir'].text(), 'mediatobbcode-config.yml')
 		initial_dir = ''
-		# filters = 'YAML Files (*.yml *.yaml);;All Files (*.*)'
-		# selected_filter = 'YAML Files (*.yml *.yaml)'
 		filters = 'INI Files (*.ini *.conf);;All Files (*.*)'
 		selected_filter = 'INI Files (*.ini *.conf)'
 		file = QFileDialog.getOpenFileName(self, caption, initial_dir, filters, selected_filter)[0]
@@ -492,6 +491,14 @@ class QtGUI(QMainWindow):
 		self.log_text.clear()
 
 		self.parse_thread = QtGUI.ParseThread()
+
+		# See ParseThread()
+		# self.parse_thread = QThread()
+		# self.parse_worker = self.ParseWorker()
+		# self.parse_worker.moveToThread(self.parse_thread)
+		# self.parse_worker.finished.connect(self.run_finish)
+		# self.parse_thread.started.connect(self.parse_worker.run)
+
 		self.parse_thread.finished.connect(self.run_finish)
 		self.parse_thread.start()
 
@@ -501,6 +508,8 @@ class QtGUI(QMainWindow):
 
 	@pyqtSlot()
 	def run_finish(self):
+		self.parse_thread.quit()
+
 		self.button_run.setText('Run')
 		self.button_run.clicked.disconnect()
 		self.button_run.clicked.connect(self.run_start)
@@ -511,12 +520,86 @@ class QtGUI(QMainWindow):
 			self.parse_thread.terminate()
 			print('Thread terminated!')
 
+		self.button_run.setText('Run')
+		self.button_run.clicked.disconnect()
+		self.button_run.clicked.connect(self.run_start)
+
+	@pyqtSlot()
+	def create_torrent(self):
+		self.get_gui_values()
+
+		# noinspection PyBroadException
+		try:
+			dott_window = QMainWindow(self)
+			ui = dott_gui.DottorrentGUI()
+			ui.setupUi(dott_window)
+			ui.loadSettings()
+			ui.clipboard = QApplication.instance().clipboard
+			dott_window.resize(500, 800)
+
+			# manipulate the dottorrent settings to reflect config options
+			ui.directoryRadioButton.setChecked(True)
+			ui.inputEdit.setText(config.opts['media_dir'])
+			if config.opts['recursive'] and config.opts['output_individual']:
+				ui.batchModeCheckBox.setChecked(True)
+			else:
+				ui.batchModeCheckBox.setChecked(False)
+			if not ui.excludeEdit.toPlainText():
+				ui.excludeEdit.setPlainText('*.txt\n*.ini\n*.torrent')
+			ui.initializeTorrent()
+
+			def dott_close_event(event):
+				ui.saveSettings()
+				event.accept()
+			dott_window.closeEvent = dott_close_event
+			dott_window.show()
+		except:
+			(errortype, value, traceback) = sys.exc_info()
+			sys.excepthook(errortype, value, traceback)
+
 	@pyqtSlot(str)
 	def log_append(self, text):
 		self.log_text.moveCursor(QTextCursor.End)
 		self.log_text.insertPlainText(text)
 
+	def closeEvent(self, event):
+		self.get_gui_values(True)
+
+		if config.opts == config.opts_saved:
+			event.accept()
+		else:
+			title = 'Settings changed'
+			question = 'There appear to be unsaved setting changes.\nAre you sure you want to quit?'
+			reply = QMessageBox.question(self, title, question, QMessageBox.Yes, QMessageBox.No)
+
+			if reply == QMessageBox.Yes:
+				event.accept()
+			else:
+				event.ignore()
+
+	class ParseWorker(QObject):
+		"""
+		Currently not implemented, see ParseThread()
+		"""
+		finished = pyqtSignal()
+
+		@pyqtSlot()
+		def run(self):
+			# noinspection PyBroadException
+			try:
+				mediatobbcode.set_paths_and_run()
+				self.finished.emit()
+			except:
+				(errortype, value, traceback) = sys.exc_info()
+				sys.excepthook(errortype, value, traceback)
+				self.exit()
+
 	class ParseThread(QThread):
+		"""
+		I know subclassing QThread is bad, but there seems to be a bug either with my setup or PyQt 5.8.1,
+		whereby no thread is created using the "moveToThread" method.
+		Confirmed this with http://stackoverflow.com/a/6789205 (using_move_to_thread())
+		"""
 		def __init__(self):
 			super().__init__()
 
@@ -530,7 +613,7 @@ class QtGUI(QMainWindow):
 				self.exit()
 
 	# redirect stdout (print) to a widget
-	# adapted from http://stackoverflow.com/questions/22581496/error-in-pyqt-qthread-not-printed
+	# adapted from http://stackoverflow.com/a/22582213
 	class StdoutRedirector(QObject):
 		writeSignal = pyqtSignal(str)
 
@@ -552,3 +635,14 @@ def resource_path(relative_path):
 		base_path = os.path.abspath('.')
 
 	return os.path.join(base_path, relative_path)
+
+
+def main():
+	app = QApplication(sys.argv)
+	gui = QtGUI()
+	gui.show()
+	sys.exit(app.exec_())
+
+# yes, you can use the GUI as an entry point as well, but this doesn't support command-line args
+if __name__ == '__main__':
+	main()

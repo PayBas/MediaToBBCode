@@ -1,6 +1,7 @@
 # coding=utf-8
 
 import configparser
+import copy
 import os
 from collections import OrderedDict
 
@@ -47,13 +48,14 @@ config = OrderedDict([
 ])
 
 opts = dict()  # Don't touch! See populate_opts()
+opts_saved = dict()  # Don't touch! Only used to determine if opts have changed since initializing/loading/saving
 
 author = 'PayBas'
 author_url = 'https://github.com/PayBas'
 script = 'MediaToBBCode.py'
 script_url = 'https://github.com/PayBas/MediaToBBCode'
-version = '1.2.1'
-compile_date = '20-03-2017'
+version = '1.2.2'
+compile_date = '21-03-2017'
 credits_bbcode = 'Output script by [url={}]PayBas[/url].'.format(script_url)
 
 
@@ -63,11 +65,13 @@ def populate_opts():
 	This is much easier to work with than the full _config_ dictionary.
 	Also checks to see if mediatobbcode-config.ini exists, and loads opts from it if it is.
 	"""
-	global opts
+	global opts, opts_saved
 
 	for group in config.values():
 		for opt, values in group.items():
 			opts[opt] = values[0]
+
+	opts_saved = copy.copy(opts)
 
 	# load mediatobbcode-config.ini to overrule hard-coded defaults, in case the user has modified it
 	if os.path.exists('mediatobbcode-config.ini'):
@@ -77,6 +81,7 @@ def populate_opts():
 
 
 def save_config_file(file):
+	global opts_saved
 	print('Saving config to: {}'.format(file))
 
 	parser = configparser.ConfigParser(allow_no_value=True)
@@ -94,13 +99,14 @@ def save_config_file(file):
 	try:
 		with open(file, 'w', encoding='utf-8') as stream:
 			parser.write(stream)
+			opts_saved = copy.copy(opts)
 	except (IOError, OSError):
 		print('ERROR: Couldn\'t save config file: {}'.format(file))
 		return
 
 
 def load_config_file(file):
-	global opts
+	global opts, opts_saved
 	print('Loading config from: {}'.format(file))
 
 	try:
@@ -133,4 +139,5 @@ def load_config_file(file):
 		return
 
 	print('Loaded config from: {}'.format(file))
+	opts_saved = copy.copy(opts)
 	return True

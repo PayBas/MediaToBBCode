@@ -3,7 +3,7 @@ MediaToBBCode.py
 
 A Python script that combines the metadata output of [MediaInfo](http://mediaarea.net/en/MediaInfo) with the BBCode output of various image-hosts to automatically generate a BBCode-formatted presentation of a media-clips collection.
 
-![Screenshot](screenshot.png)
+![Screenshot](docs/screenshot.png)
 
 Besides the aesthetics, there's value in having file metadata in your online posts/presentations. Image-hosts will not be online forever. This way, users can find and compare files longer into the future.
 
@@ -11,13 +11,14 @@ This script can save you quite a lot of time by automating the most tedious part
 
 It now comes with a simple GUI.
 
-![Screenshot2](screenshot2.png)
+![Screenshot2](docs/screenshot2.png)
 
 ## Features
 - Easy GUI for those not wanting to use the command-line.
     - Output formatting options (including display/styling options)
     - Manual or automatic image-list selection.
     - Save/load of configurations for easier reuse.
+    - Built-in torrent creator (courtesy of [dottorrent-gui](https://github.com/kz26/dottorrent-gui)).
 - Parse local media files (recursively or not) using the MediaInfo lib.
 - Cleanup of media metadata.
 - Detect image-set ZIP archives and provide information on their contents.
@@ -32,6 +33,7 @@ These requirements only apply if you're using the python script. The executable 
 - [MediaInfo](https://mediaarea.net/en/MediaInfo/Download) (32/64bit dll/lib must match Python environment)
 - [pymediainfo](https://pypi.python.org/pypi/pymediainfo)
 - [PyQt5](https://riverbankcomputing.com/software/pyqt/intro) (if you wish to use the GUI)
+- [dottorrent-gui](https://github.com/kz26/dottorrent-gui) (if you wish to use the GUI)
 - [Pillow](https://python-pillow.org/) (if you wish to process image-sets)
 - [bbcode](https://pypi.python.org/pypi/bbcode/1.0.19) (if you wish to output as HTML)
 
@@ -41,6 +43,7 @@ sudo apt install mediainfo    # MediaInfo library
 sudo apt install python3-pip  # python package manager
 pip3 install pymediainfo      # python interface for MediaInfo
 pip3 install PyQt5            # if you wish to use the GUI
+pip3 install dottorrent-gui   # if you wish to use the GUI
 pip3 install pillow           # if you wish to process image-sets
 pip3 install bbcode           # if you wish to output as HTML
 ````

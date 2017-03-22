@@ -1226,13 +1226,8 @@ def main(argv):
 			'url', 'nothumb', 'tinylink', 'suppress', 'all', 'webhtml', 'fullsize', 'config=', 'xdebug'])
 		if not options:
 			# create GUI
-			from PyQt5.QtWidgets import QApplication
 			import gui
-
-			app = QApplication(sys.argv)
-			gui = gui.QtGUI()
-			gui.show()
-			sys.exit(app.exec_())
+			gui.main()
 
 	except getopt.GetoptError:
 		print(h)

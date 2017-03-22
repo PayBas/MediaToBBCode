@@ -90,3 +90,4 @@ ENV/
 
 .idea
 *.dll
+/dist/archive_viewer.py

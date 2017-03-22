@@ -1,0 +1,5 @@
+The script uses these files ONLY when the image-host is ImageBam.
+ImageBam creates file-names for uploaded images based on a (substring) of the MD5 hash.
+So if we want to match the image BBCodes for each output to the correct file-name, we need to calculate the hash offline.
+This of course assumes that the image file-names match the original media file's name 100% (except for the file-extension)
+

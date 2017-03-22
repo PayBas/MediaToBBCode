@@ -3,15 +3,15 @@ MediaToBBCode.py
 
 A Python script that combines the metadata output of [MediaInfo](http://mediaarea.net/en/MediaInfo) with the BBCode output of various image-hosts to automatically generate a BBCode-formatted presentation of a media-clips collection.
 
-![Screenshot](docs/screenshot.png)
+![Screenshot](docs/images/screenshot_output.png)
 
 Besides the aesthetics, there's value in having file metadata in your online posts/presentations. Image-hosts will not be online forever. This way, users can find and compare files longer into the future.
 
 This script can save you quite a lot of time by automating the most tedious part of the output. It will also check to make sure that all your images are correctly paired with the file on each line.
 
-It now comes with a simple GUI.
+It comes with a simple GUI.
 
-![Screenshot2](docs/screenshot2.png)
+![Screenshot2](docs/images/screenshot_gui.png)
 
 ## Features
 - Easy GUI for those not wanting to use the command-line.
@@ -28,7 +28,7 @@ It now comes with a simple GUI.
 - Automatically generate performer tags (as found in the file-names).
 
 #### Requirements
-These requirements only apply if you're using the python script. The executable GUI has all these packed.
+These requirements only apply if you're using the python script. The executable files have all these packed.
 - [Python 3.4+](https://www.python.org/downloads/)
 - [MediaInfo](https://mediaarea.net/en/MediaInfo/Download) (32/64bit dll/lib must match Python environment)
 - [pymediainfo](https://pypi.python.org/pypi/pymediainfo)
@@ -66,7 +66,7 @@ pip3 install bbcode           # if you wish to output as HTML
 1. Copy the Forum/BBCode output text as displayed on the host website after uploading, and paste it into a new txt file. Lets call it `my-clips.txt` for now. **
 1. Rename the txt-file(s) you just created containing the image-host data, to the directory name you want to parse. So if you want to parse `/home/me/Vids/Led Zeppelin`, name the file `Led Zeppelin.txt` (and `Led Zeppelin_alt.txt` if you want to add a backup host). 
 1. Place the txt-file(s) in the directory where you want your output files to be created (like `~/Desktop/output/`).
-1. Run: `python3 mediatobbcode.py -m "/home/me/Vids/Led Zeppelin" -o ~/Desktop/output/`
+1. Run: `python3 cli.py -m "/home/me/Vids/Led Zeppelin" -o ~/Desktop/output/`
     * __Or use the executable GUI.__ You can find it in `/dist`
 1. Copy the contents of the generated file (`Led Zeppelin_output.txt` in this case) into your presentation.
 
@@ -91,9 +91,9 @@ Files (using absolute paths in this example, but relative paths work equally wel
 ~/Desktop/post all/foo.txt      (BBCode output from image-host: 5 entries)
 ~/Desktop/post all/foo_alt.txt  (BBCode output from back-up image-host: 5 entries)
 ````
-Run: `python3 mediatobbcode.py -m /mnt/foo -o "~/Desktop/post one"`
+Run: `python3 cli.py -m /mnt/foo -o "~/Desktop/post one"`
 
-Run: `python3 mediatobbcode.py -m /mnt/foo -o -r "~/Desktop/post all"` (recursive)
+Run: `python3 cli.py -m /mnt/foo -o -r "~/Desktop/post all"` (recursive)
 
 Output:
 ````

@@ -53,13 +53,14 @@ config = OrderedDict([
 opts = dict()  # Don't touch! See populate_opts()
 opts_saved = dict()  # Don't touch! Only used to determine if opts have changed since initializing/loading/saving
 debug_imghost_slugs = False  # For debugging. Only available from the command-line.
+kill_thread = False  # Flag for killing the parsing process, since terminating a QThread is unreliable
 
 author = 'PayBas'
 author_url = 'https://github.com/PayBas'
 script = 'MediaToBBCode.py'
 script_url = 'https://github.com/PayBas/MediaToBBCode'
-version = '1.2.3'
-compile_date = '22-03-2017'
+version = '1.2.4'
+compile_date = '27-03-2017'
 credits_bbcode = 'Output script by [url={}]PayBas[/url].'.format(script_url)
 
 

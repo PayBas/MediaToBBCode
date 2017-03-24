@@ -29,11 +29,9 @@ def main(argv):
 		'For a full list of command-line options, see the online documentation.'
 
 	try:
-		options, args = getopt.getopt(argv, 'hm:o:rzlbifuntsawzc:x',
-			['help', 'mediadir=', 'outputdir=', 'recursive', 'zip', 'list', 'bare', 'individual', 'flat',
+		options, args = getopt.getopt(argv, 'hvm:o:rzlbifuntsawqc:x',
+			['help', 'version', 'mediadir=', 'outputdir=', 'recursive', 'zip', 'list', 'bare', 'individual', 'flat',
 			'url', 'nothumb', 'tinylink', 'suppress', 'all', 'webhtml', 'fullsize', 'config=', 'xdebug'])
-		if not options:
-			print('No command-line options specified. Run using default settings on local directory.')
 
 	except getopt.GetoptError:
 		print(h)
@@ -42,6 +40,9 @@ def main(argv):
 	for opt, arg in options:
 		if opt in ('-h', '--help'):
 			print(h)
+			sys.exit()
+		elif opt in ('-v', '--version'):
+			print(config.script + ' ' + config.version)
 			sys.exit()
 
 		elif opt in ('-m', '--mediadir'):
@@ -71,7 +72,7 @@ def main(argv):
 		elif opt in ('-s', '--suppress'):
 			config.opts['suppress_img_warnings'] = True
 
-		elif opt in ('-z', '--fullsize'):
+		elif opt in ('-q', '--fullsize'):
 			config.opts['use_imagelist_fullsize'] = True
 		elif opt in ('-a', '--all'):
 			config.opts['all_layouts'] = True
@@ -87,6 +88,11 @@ def main(argv):
 			config.debug_imghost_slugs = True
 			core.debug_imghost_matching()
 			sys.exit()
+
+	if options:
+		print('Config settings updated with command-line arguments.')
+	else:
+		print('No command-line options specified. Run using default settings on local directory.')
 
 	# initialize the script using the command-line arguments
 	core.set_paths_and_run()

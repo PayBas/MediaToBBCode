@@ -51,7 +51,7 @@ pip3 install bbcode           # if you wish to output as HTML
 ## Instructions
 
 1. Make sure you have all the required elements listed above (or use the executable GUI in `/dist`).
-1. Use your favorite thumbnail maker application to create screenshots of all the videos. Make sure that the output images have the exact same file-name as the original videos (besides the extension obviously). But __don't__ include the original media extension in the output name. So `foo.mp4` should give `foo.jpg`, __not__ `foo.mp4.jpg`. 
+1. Use your favorite thumbnail maker application to create screenshots of all the videos. Make sure that the output images have the exact same file-name as the original videos (besides the extension obviously). But __don't__ include the original media extension in the output name. So `foo.mp4` should give `foo.jpg`, __not__ `foo.mp4.jpg`.
 1. Upload all the (thumbnail) images to one of the following image-hosts: *
     * [ImageBam.com](http://www.imagebam.com/)
     * [Postimage.io](https://postimage.io/)
@@ -64,7 +64,7 @@ pip3 install bbcode           # if you wish to output as HTML
         * [Jerking](https://jerking.empornium.ph/)
         * [Fapping](https://fapping.empornium.sx/)
 1. Copy the Forum/BBCode output text as displayed on the host website after uploading, and paste it into a new txt file. Lets call it `my-clips.txt` for now. **
-1. Rename the txt-file(s) you just created containing the image-host data, to the directory name you want to parse. So if you want to parse `/home/me/Vids/Led Zeppelin`, name the file `Led Zeppelin.txt` (and `Led Zeppelin_alt.txt` if you want to add a backup host). 
+1. Rename the txt-file(s) you just created containing the image-host data, to the directory name you want to parse. So if you want to parse `/home/me/Vids/Led Zeppelin`, name the file `Led Zeppelin.txt` (and `Led Zeppelin_alt.txt` if you want to add a backup host).
 1. Place the txt-file(s) in the directory where you want your output files to be created (like `~/Desktop/output/`).
 1. Run: `python3 cli.py -m "/home/me/Vids/Led Zeppelin" -o ~/Desktop/output/`
     * __Or use the executable GUI.__ You can find it in `/dist`
@@ -117,9 +117,9 @@ Output:
 * `-b` or `--bare` Stops the table title heading from being automatically generated. Use this if the BBCode engine on your website doesn't support `[table]` tags or if you simply don't like it.
 * `-u` or `--url` Embeds a simple link to the full-sized image in the output, rather than a thumbnail (which links to the same image). Use this if the BBCode engine on your website doesn't support `[spoiler]` tags.
 * `-t` or `--tinylink` Instead of the whole file-name being a link to the full-sized image (or a `[spoiler]` tag), a smaller link to the same image will be inserted in the row instead.
-* `-n` or `--nothumb` Will force embedded images to be output using the `[img]` tag. Use this if the BBCode engine on your website doesn't support `[thumb]` tags. 
+* `-n` or `--nothumb` Will force embedded images to be output using the `[img]` tag. Use this if the BBCode engine on your website doesn't support `[thumb]` tags.
 * `-s` or `--suppress` Prevents warning messages from appearing in the output if no suitable image or image-link was found.
-* `-z` or `--fullsize` Will output all image-links located in the `_fullsize.txt` file in-line above the main content in a single `[spoiler]` tag.
+* `-q` or `--fullsize` Will output all image-links located in the `_fullsize.txt` file in-line above the main content in a single `[spoiler]` tag.
 * `-a` or `--all` Will output all 7 different layout options below each other, easy for testing and picking your favorite. Note that this will include layouts with `[table]` and `[spoiler]` tags, so be careful if these aren't supported.
 * `-w` or `--webhtml` Will convert the final BBCode output to HTML and open your browser automatically to view the output.
 

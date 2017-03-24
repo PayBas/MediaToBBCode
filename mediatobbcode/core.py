@@ -51,20 +51,21 @@ def parse_files():
 	ran_at_all = False  # canary - general
 	parsed_at_all = False  # canary - for when output_individual has cleared clips[] after sending to output
 
-	media_ext = ('.3gp', '.amv', '.asf', '.avi', '.divx', '.f4v', '.flv', '.m2v', '.m4v', '.mkv', '.mp4', '.mpeg',
-				'.mpg', '.mov', '.mts', '.ogg', '.ogv', '.qt', '.rm', '.rmvb', '.ts', '.vob', '.webm', '.wmv')
-	zip_ext = ('.zip', '.zipx')
+	media_ext = ['.3gp', '.amv', '.asf', '.avi', '.divx', '.f4v', '.flv', '.m2v', '.m4v', '.mkv', '.mp4', '.mpeg',
+				'.mpg', '.mov', '.mts', '.ogg', '.ogv', '.qt', '.rm', '.rmvb', '.ts', '.vob', '.webm', '.wmv']
+	zip_ext = ['.zip', '.zipx']
 
 	if config.opts['parse_zip']:
-		parse_ext = media_ext + zip_ext
+		parse_ext = tuple(media_ext + zip_ext)
 	else:
-		parse_ext = media_ext
+		parse_ext = tuple(media_ext)
 
 	if config.opts['recursive'] and config.opts['output_separators'] and not config.opts['output_individual']:
 		insert_separators = True
 	else:
 		insert_separators = False
 
+	# start directory traversal
 	for root, dirs, files in os.walk(config.opts['media_dir']):
 		print('\nSWITCH dir: {}'.format(root))
 		new_dir = True
@@ -73,18 +74,23 @@ def parse_files():
 		current_relative_dir = os.path.relpath(root, config.opts['media_dir'])
 
 		for file in files:
+			# help the GUI to terminate the thread
+			if config.kill_thread:
+				config.kill_thread = False
+				return
+
 			# skip files with extensions we don't want to parse
 			if not file.lower().endswith(parse_ext):
 				print(' skipped file: {}'.format(file))
 				continue
 
 			# if parse_zip is enabled, check ZIP files to see if it's an image-set
-			if config.opts['parse_zip'] and file.lower().endswith(zip_ext):
+			if config.opts['parse_zip'] and file.lower().endswith(tuple(zip_ext)):
 				imgset = parse_zip_file(root, file)
 				if imgset:
 					# create a separator with the relative directory, but only if it's the first valid file in the dir
 					if new_zip_dir and insert_separators and current_relative_dir is not '.':
-						imagesets.append(current_relative_dir)
+						imagesets.append(Separator(current_relative_dir))
 					new_zip_dir = False
 
 					imagesets.append(imgset)
@@ -95,7 +101,7 @@ def parse_files():
 			if clip:
 				# create a separator with the relative directory, but only if it's the first valid file in the dir
 				if new_dir and insert_separators and current_relative_dir is not '.':
-					clips.append(current_relative_dir)
+					clips.append(Separator(current_relative_dir))
 				new_dir = False
 
 				clips.append(metadata_cleanup(clip))
@@ -106,7 +112,7 @@ def parse_files():
 		elif config.opts['output_individual'] and (clips or imagesets):
 			# output each dir as a separate file, so we need to reset the clips after each successfully parsed dir
 			parsed_at_all = True
-			format_final_output({'clips': clips, 'imagesets': imagesets}, root)
+			generate_output({'clips': clips, 'imagesets': imagesets}, root)
 			clips = []
 			imagesets = []
 
@@ -115,13 +121,12 @@ def parse_files():
 	elif not clips and not imagesets and not parsed_at_all:
 		print('ERROR: no valid media files found in: {}'.format(config.opts['media_dir']))
 	elif not config.opts['output_individual']:
-		format_final_output({'clips': clips, 'imagesets': imagesets}, config.opts['media_dir'])
+		generate_output({'clips': clips, 'imagesets': imagesets}, config.opts['media_dir'])
 
 
 def parse_media_file(root, file):
 	"""
 	Uses the pymediainfo module to parse each file and extract media information from each video-clip.
-	Requires MediaInfo and pymediainfo
 	"""
 	try:
 		print(' attempt file: {}'.format(file))
@@ -225,16 +230,21 @@ def parse_zip_file(root, file):
 		print(' ERROR parsing  : {}  -  unsupported archive type?'.format(file))
 
 
-def format_final_output(items, source):
+def generate_output(items, source):
 	"""
-	Takes the items (Clips and/or ImageSets) generated from a dir parsing session and determines the formatting to use,
-	combines them with image-host data, and finally writing to the output.
+	Takes the items (Clips and/or ImageSets) generated from a dir parsing session and determines the formatting to use.
 	"""
 	global tags
 
 	# no items (clips/image-sets)? something is wrong
 	if not items:
 		print('ERROR: No media clips found! The script shouldn\'t even have gotten this far. o_O')
+		return
+
+	# stop if this combination is active, it will produce a mess
+	if config.opts['whole_filename_is_link'] and config.opts['embed_images'] and not config.opts['output_as_table']:
+		print('Using the parameters "whole_filename_is_link" and "embed_images" and not "output_as_table"'
+			' is the only invalid combination\n\n')
 		return
 
 	# setup some file locations for input/output
@@ -276,76 +286,44 @@ def format_final_output(items, source):
 		print('ERROR: Couldn\'t create output file: {}  (invalid directory?)'.format(file_output))
 		return
 
-	# stop if this combination is active, it will produce a mess
-	if config.opts['whole_filename_is_link'] and config.opts['embed_images'] and not config.opts['output_as_table']:
-		print('Using the parameters "whole_filename_is_link" and "embed_images" and not "output_as_table"'
-			' is the only invalid combination\n\n')
-		output.close()
-		return
-
-	# TODO: create a spoiler for each dir when using recursive
-	# try to create a list of all the full-sized images (if present) for fast single-click browsing
-	if config.opts['use_imagelist_fullsize'] and not config.opts['all_layouts']:
-		if config.opts['use_primary_as_fullsize']:
-			file_img_list_fullsize = file_img_list
-		try:
-			fullsize_file = open(file_img_list_fullsize)
-			fullsize_list = fullsize_file.read().split()
-
-			# set up the table header title before the actual content
-			if config.opts['output_as_table'] and config.opts['output_table_titles']:
-				output.write('[table=100%][tr][td={1}][bg={2}][align=center][font={4}][size=5][color={3}]'
-							'[b]{0}[/b][/color][/size][/font][/align][/bg][/td][/tr][/table]'
-							.format(config.opts['tFullSizeSS'], config.opts['cTHBD'], config.opts['cTHBG'],
-									config.opts['cTHF'], config.opts['fTH']))
-			fullsize_content = ''
-			first = True
-			for line in fullsize_list:
-				if first:
-					fullsize_content += line
-					first = False
-				else:
-					fullsize_content += '\n' + line
-
-			output.write('[bg={2}]\n[align=center][size=2][spoiler={1}]{0}[/spoiler][/size][/align]\n[/bg]\n\n'
-						.format(fullsize_content, config.opts['tFullSizeShow'], config.opts['cTBBG']))
-
-		except (IOError, OSError):
-			print('NOTICE: No full-size image-list detected. Looked for: {}'.format(file_img_list_fullsize))
-			pass
-
-	# get the image data for later use; img_data is a string with error details if no compatible image data was found
+	# get the image data for later use
 	img_data = get_img_list(file_img_list)
-	if isinstance(img_data, str):
-		img_error_msg = img_data
+	if not img_data:
 		# just in case users use the script wrong (by only providing _fullsize.txt containing direct links)
 		img_data = get_img_list(file_img_list_fullsize)
-		if isinstance(img_data, str):
-			output.write(img_error_msg + '\n\n')
-			img_data = None
 
 	# get a second set of image data to provide alternative image-links in case the primary image-host should die
-	has_alts = False
 	img_data_alt = get_img_list(file_img_list_alt, True)
-	if isinstance(img_data_alt, str):
-		output.write(img_data_alt + '\n\n')
-		img_data_alt = None
-	elif img_data_alt:
-		has_alts = True
+	has_alts = True if img_data_alt else False
+
+	# get the full-size image data (see format_fullsize_section())
+	img_data_fullsize = None
+	if config.opts['use_imagelist_fullsize'] and not config.opts['use_primary_as_fullsize']:
+		img_data_fullsize = get_img_list(file_img_list_fullsize)
+
+	# convert the dictionary of lists of objects, to a dictionary of lists of object/lists (with image data)
+	prepared_items = prepare_items(items, img_data, img_data_alt, img_data_fullsize)
+
+	# create a list of all the full-sized images (if present) for fast single-click browsing
+	if config.opts['use_imagelist_fullsize']:
+		for _type, _list in prepared_items.items():
+			if not _list:
+				continue
+			output.write(format_fullsize_section(_list))
 
 	# everything is set up, now we can finally output something useful
 	if config.opts['all_layouts']:
-		generate_all_layouts(output, items, img_data, img_data_alt, has_alts)
+		generate_all_layouts(output, prepared_items, has_alts)
 	else:
-		for _type, _list in items.items():
+		for _type, _list in prepared_items.items():
 			if not _list:
 				continue
-			output.write(format_collection(_type, _list, img_data, img_data_alt, has_alts))
+			output.write(format_collection(_type, _list, has_alts))
 
 	# append the generated performer tags to the output
 	if tags:
 		output.write('PERFORMER TAGS:  ' + ' '.join(tags) + '\n\n')
-		tags = []  # reset global tags for next run (particularly in recursive mode)
+		tags = []  # reset global tags for next run (particularly in recursive/individual mode)
 		print('Performer tags added')
 
 	# finished succesfully
@@ -358,12 +336,62 @@ def format_final_output(items, source):
 		output_html.format_html_output(file_output, file_output_html)
 
 
-def format_collection(_type, items, img_data, img_data_alt, has_alts):
+def prepare_items(items, img_data, img_data_alt, img_data_fullsize):
+	"""
+	Combine media items with image data (from 3 different image-list sources).
+	"""
+	global tags
+
+	for _type, _list in items.items():
+		if not _list:
+			continue
+
+		# iterate over each item, and add corresponding image data
+		for _id, item in enumerate(_list):
+
+			# separators don't require any processing
+			if isinstance(item, Separator):
+				continue
+
+			img_match = img_match_alt = img_match_fullsize = None
+
+			# get thumbnail data from image-list, alternative/backup image-list, and full-size image-list
+			for _set, idata in enumerate([img_data, img_data_alt, img_data_fullsize]):
+				if idata:
+					if 'imagebam' in idata['host']:
+						file_slug = get_screenshot_hash(item.filename, item.filepath, 'md5', 6)
+					else:
+						file_slug = slugify(item.filename, idata['host'])
+
+					match = match_slug(idata['img_list'], file_slug, idata['file'])  # list, can be multiple!
+
+					if _set == 0:
+						img_match = match
+					elif _set == 1:
+						img_match_alt = match
+					elif _set == 2:
+						img_match_fullsize = match
+
+			if config.opts['use_imagelist_fullsize'] and config.opts['use_primary_as_fullsize']:
+				img_match_fullsize = img_match
+
+			# try to generate performer tags for presentation, see generate_tags()
+			generate_tags(item.filename)
+
+			# convert the item object to a list, combining the object with its image matches
+			items[_type][_id] = {'item': item,
+								'img_match': img_match,
+								'img_match_alt': img_match_alt,
+								'img_match_fullsize': img_match_fullsize}
+
+	return items
+
+
+def format_collection(_type, _list, has_alts):
 	"""
 	Sets up the output for a collection (Clips or ImageSets).
 	"""
 	column_names = None
-	items_parsed = 0
 	output = ''
 
 	# if we choose to output the data as a table, we need to set up the table headers before the data first row
@@ -397,40 +425,20 @@ def format_collection(_type, items, img_data, img_data_alt, has_alts):
 		th += '[/tr]\n'
 		output += th
 
-	# iterate over each item, and do some magic
-	for item in items:
+	items_parsed = 0
 
-		# if the item is a string, it represents the parsing dir of the following clips/image-sets, i.e. a separator
-		if isinstance(item, str):
+	# iterate over each item, and pass to row formatting
+	for item in _list:
+
+		if isinstance(item, Separator):
 			output += format_row_separator(item, column_names)
 			continue
 		else:
 			# don't count separators towards the final output
 			items_parsed += 1
 
-		# get thumbnail data from image-list and alternative/backup image-list
-		img_match = img_match_alt = None
-
-		for idata in (img_data, img_data_alt):
-			if idata:
-				if 'imagebam' in idata['host']:
-					file_slug = get_screenshot_hash(item.filename, item.filepath, 'md5', 6)
-				else:
-					file_slug = slugify(item.filename, idata['host'])
-
-				match = match_slug(idata['img_list'], file_slug, idata['file'])  # list, can be multiple!
-
-				# not ideal, but we can't use enumerate() on None object-types
-				if img_match:
-					img_match_alt = match
-				else:
-					img_match = match
-
-		# try to generate performer tags for presentation, see generate_tags()
-		generate_tags(item.filename)
-
-		# generate and output the item's content row
-		output += format_row_common(item, img_match, img_match_alt, has_alts)
+		# generate the item's content row
+		output += format_row_common(item['item'], item['img_match'], item['img_match_alt'], has_alts)
 
 	# if we choose to output the data as a table, we need to set up the table footer after the last data row
 	if config.opts['output_as_table']:
@@ -548,7 +556,7 @@ def format_row_table(item, img_code, img_msg, img_code_alt, img_msg_alt, has_alt
 def format_row_list(item, img_code, img_msg, img_code_alt, img_msg_alt):
 	"""
 	Formats the output BBCode for an individual item (row) in the resulting list.
-	This is messier to look at, but more flexible with images (and BBCode support)
+	This is messier to look at, but more flexible with images (and BBCode support).
 	"""
 	filename = item.filename
 
@@ -591,10 +599,12 @@ def format_row_list(item, img_code, img_msg, img_code_alt, img_msg_alt):
 		return ''
 
 
-def format_row_separator(dir_name, column_names):
+def format_row_separator(separator, column_names):
 	"""
 	Formats a separator row with the current parsing directory. For prettier organizing of rows.
 	"""
+	dir_name = separator.directory
+
 	if config.opts['output_as_table']:
 		td_opts = 'nb'  # TODO nb support is common?
 		if config.opts['cTSEPF']:
@@ -609,6 +619,51 @@ def format_row_separator(dir_name, column_names):
 	else:
 		# just a boring row with the directory name
 		return '[size=2]- [b][i]{}[/i][/b][/size]\n'.format(dir_name)
+
+
+def format_fullsize_section(_list):
+	"""
+	Create a list of all the full-sized images for fast single-click browsing. But requires support for [spoiler] tags.
+	"""
+	output = ''
+
+	# set up the table header title before the actual content
+	if config.opts['output_as_table'] and config.opts['output_table_titles']:
+		output += ('[table=100%][tr][td={1}][bg={2}][align=center][font={4}][size=5][color={3}]'
+					'[b]{0}[/b][/color][/size][/font][/align][/bg][/td][/tr][/table]'
+					.format(config.opts['tFullSizeSS'], config.opts['cTHBD'], config.opts['cTHBG'],
+							config.opts['cTHF'], config.opts['fTH']))
+
+	content = ''
+	previous_item_was_separator = False
+	for _id, item in enumerate(_list):
+		if isinstance(item, Separator):
+			if _id > 0:
+				content += '[/spoiler]\n\n'
+			content += '[spoiler={}]'.format(item.directory)
+			previous_item_was_separator = True
+			continue
+		elif _id == 0:
+			content += '[spoiler={}]'.format(config.opts['tFullSizeShow'])
+			previous_item_was_separator = True
+
+		if not previous_item_was_separator:
+			content += '\n'
+
+		previous_item_was_separator = False
+		img_match = item['img_match_fullsize']
+		if img_match and len(img_match) == 1:
+			content += '[img]{0}[/img]'.format(img_match[0]['bbimg'])
+		elif img_match:
+			content += '[color={}]Image conflict for: {}![/color]'.format(cWARN, item['item'].filename)
+		else:
+			content += '[color={}]Image missing for: {}![/color]'.format(cERR, item['item'].filename)
+
+	content += '[/spoiler]'
+
+	output += ('[bg={1}]\n[align=center][size=2]{0}[/size][/align]\n[/bg]\n\n'.format(content, config.opts['cTBBG']))
+
+	return output
 
 
 def metadata_cleanup(clip):
@@ -747,18 +802,15 @@ def get_img_list(file_img_list, is_alt=False):
 			# We always check for the _alt.txt image-list. But if there doesn't appear to be a file to parse,
 			# we should assume that the user simply doesn't with to use this feature, and just ignore it.
 			print('NOTICE: No corresponding alternative image-list found. Looked for: {}'.format(file_img_list))
-			return
 		else:
-			error = ('WARNING: No corresponding image-list found! Looked for: {}'.format(file_img_list))
-			print(error)
-			return error
+			print('WARNING: No corresponding image-list found! Looked for: {}'.format(file_img_list))
+		return
 
 	img_items = file.read().split()
 
 	if not img_items:
-		error = ('WARNING: Image-list file ({}) seems to be empty!'.format(file_img_list))
-		print(error)
-		return error
+		print('WARNING: Image-list file ({}) seems to be empty!'.format(file_img_list))
+		return
 
 	if 'imagebam.' in img_items[0]:
 		img_host = 'imagebam'
@@ -777,15 +829,13 @@ def get_img_list(file_img_list, is_alt=False):
 	elif 'fapping.empornium.' in img_items[0]:
 		img_host = 'fapping'
 	else:
-		error = 'WARNING: Unsupported image-host used in {}!\n' \
-				'Only use imagebam.com, pixhost.org, postimg.org, imagetwist.com, imagevenue.com, imgchili.net, ' \
-				'pixxxels.org, jerking.empornium.ph or fapping.empornium.sx'\
-				.format(file_img_list)
-		print(error)
+		print('WARNING: Unsupported image-host used in {}!\n'
+			'Only use imagebam.com, pixhost.org, postimg.org, imagetwist.com, imagevenue.com, imgchili.net, '
+			'pixxxels.org, jerking.empornium.ph or fapping.empornium.sx'.format(file_img_list))
 		if config.debug_imghost_slugs:
 			img_host = 'unknown image-host'
 		else:
-			return error
+			return
 
 	img_list = []
 
@@ -829,9 +879,7 @@ def get_img_list(file_img_list, is_alt=False):
 	file.close()
 
 	if not img_list:
-		error = ('WARNING: No valid image data in image-list! Check the contents of: {}'.format(file_img_list))
-		print(error)
-		return error
+		print('WARNING: No valid image data in image-list! Check the contents of: {}'.format(file_img_list))
 	else:
 		return {'host': img_host, 'img_list': img_list, 'file': file_img_list}
 
@@ -963,12 +1011,12 @@ def match_slug(img_list, file_slug, file_img_list):
 			continue
 
 	if len(matches) > 1:
-		print('WARNING: Multiple corresponding image-urls found for "{0}" in: {1}'.format(file_slug, file_img_list))
+		print('WARNING: Multiple corresponding image-urls found for "{}" in: {}'.format(file_slug, file_img_list))
 		return matches
 	elif matches:
 		return matches
 	else:
-		print('WARNING: No corresponding image-url found for "{0}" in: {1}'.format(file_slug, file_img_list))
+		print('WARNING: No corresponding image-url found for "{}" in: {}'.format(file_slug, file_img_list))
 
 
 def debug_imghost_matching(ifile='./tests/input.txt', hdir='./tests/image-hosts/', mdir='./tests/upload/'):
@@ -1009,7 +1057,7 @@ def debug_imghost_matching(ifile='./tests/input.txt', hdir='./tests/image-hosts/
 			print('\n{1}TEST HOST{2}  : {0}'.format(hfile, c['HEAD'], c['ENDC']))
 
 			img_data = get_img_list(os.path.join(hdir, hfile))
-			if not img_data or isinstance(img_data, str):
+			if not img_data:
 				continue
 
 			# for each file-name specified in the test file, we will check the host's output to find a match
@@ -1109,7 +1157,7 @@ def generate_tags(filename):
 					tags.append(tag)
 
 
-def generate_all_layouts(output, items, img_data, img_data_alt, has_alts):
+def generate_all_layouts(output, prepared_items, has_alts):
 	"""
 	Runs format_collection() multiple times with differing settings to generate all possible layouts.
 	"""
@@ -1139,10 +1187,10 @@ def generate_all_layouts(output, items, img_data, img_data_alt, has_alts):
 
 		output.write('\n\nCommand-line options: [size=3][b]{}[/b][/size]\n\n'.format(command_line_options))
 
-		for _type, _list in items.items():
+		for _type, _list in prepared_items.items():
 			if not _list:
 				continue
-			output.write(format_collection(_type, _list, img_data, img_data_alt, has_alts))
+			output.write(format_collection(_type, _list, has_alts))
 
 	config.opts = original_opts
 
@@ -1183,3 +1231,9 @@ class ImageSet(object):
 		self.orig_size = orig_size
 		self.img_count = img_count
 		self.resolution = resolution
+
+
+class Separator(object):
+	def __init__(self, directory):
+
+		self.directory = directory

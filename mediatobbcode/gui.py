@@ -493,6 +493,7 @@ class QtGUI(QMainWindow):
 	def run_start(self):
 		self.get_gui_values()
 		self.log_text.clear()
+		config.kill_thread = False
 
 		self.parse_thread = QThread()
 		self.parse_worker = self.ParseWorker()
@@ -517,12 +518,9 @@ class QtGUI(QMainWindow):
 	@pyqtSlot()
 	def run_terminate(self):
 		if self.parse_thread.isRunning():
+			config.kill_thread = True
 			self.parse_thread.terminate()
 			print('Thread terminated!')
-
-		self.button_run.setText('Run')
-		self.button_run.clicked.disconnect()
-		self.button_run.clicked.connect(self.run_start)
 
 	@pyqtSlot()
 	def create_torrent(self):

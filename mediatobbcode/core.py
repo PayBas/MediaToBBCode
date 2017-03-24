@@ -1,16 +1,22 @@
-# encoding: utf-8
+#!/usr/bin/env python3
+# coding=utf-8
+# Copyright 2017 PayBas
+# All Rights Reserved.
+
 import copy
 import os
 import re
+import sys
 import unicodedata
 from hashlib import md5
 from urllib.parse import urlparse
+from zipfile import ZipFile, BadZipFile
+from pymediainfo import MediaInfo
 import config
 
-layouts_busy = False  # Don't touch! Used to determine if we are still in the all_layouts loop.
-layouts_last = False  # Don't touch! Used to only run format_html_output once.
 cERR = '#F00'  # output color for errors
 cWARN = '#F80'  # output color for warnings
+tags = []
 
 
 def set_paths_and_run():
@@ -32,113 +38,67 @@ def set_paths_and_run():
 	print('using media_dir  = ' + config.opts['media_dir'])
 	print('using output_dir = ' + config.opts['output_dir'])
 
-	parse_media_files()
+	parse_files()
 
 
-def parse_media_files():
+def parse_files():
 	"""
-	Uses the pymediainfo module to parse each file in a directory (recursively), and extract media information from
-	each video-clip. It creates Clip objects and stores it in a clips list for later use. Also detects image-sets.
-	Requires MediaInfo and pymediainfo
+	Traverses the specified media_dir directory and detects all video-clips (and image-sets if specified).
+	Depending on whether output_individual is used, it will call to output once or for each directory parsed.
 	"""
-	try:
-		from pymediainfo import MediaInfo
-	except ImportError:
-		print('\nERROR: Couldn\'t import MediaInfo module from pymediainfo!\n')
-		return
-
 	clips = []
 	imagesets = []
 	ran_at_all = False  # canary - general
 	parsed_at_all = False  # canary - for when output_individual has cleared clips[] after sending to output
 
-	# ignore some common file-extensions often found alongside videos
-	# TODO unix is case-sensitive :( and switch to include rather than exclude
-	skip_ext = ['.jpg', '.JPG', '.jpeg', 'JPEG', '.png', '.PNG', '.gif', '.GIF', '.psd', '.ai',
-				'.txt', '.nfo', '.NFO', '.doc', '.xml', '.csv', '.pdf', '.part',
-				'.flac', '.mp3', '.acc', '.wav', '.pls', '.m3u', '.torrent']
-	zip_ext = ['.zip', '.ZIP', '.7z', '.7Z', '.gz', '.GZ', '.tar', '.TAR', '.rar', '.RAR']
+	media_ext = ('.3gp', '.amv', '.asf', '.avi', '.divx', '.f4v', '.flv', '.m2v', '.m4v', '.mkv', '.mp4', '.mpeg',
+				'.mpg', '.mov', '.mts', '.ogg', '.ogv', '.qt', '.rm', '.rmvb', '.ts', '.vob', '.webm', '.wmv')
+	zip_ext = ('.zip', '.zipx')
+
 	if config.opts['parse_zip']:
-		zip_ext = tuple(zip_ext)
+		parse_ext = media_ext + zip_ext
 	else:
-		skip_ext.extend(zip_ext)
-	skip_ext = tuple(skip_ext)
+		parse_ext = media_ext
+
+	if config.opts['recursive'] and config.opts['output_separators'] and not config.opts['output_individual']:
+		insert_separators = True
+	else:
+		insert_separators = False
 
 	for root, dirs, files in os.walk(config.opts['media_dir']):
 		print('\nSWITCH dir: {}'.format(root))
 		new_dir = True
+		new_zip_dir = True
 		ran_at_all = True
+		current_relative_dir = os.path.relpath(root, config.opts['media_dir'])
 
 		for file in files:
-			# quickly ignore non-video files to save resources
-			if file.endswith(skip_ext):
+			# skip files with extensions we don't want to parse
+			if not file.lower().endswith(parse_ext):
 				print(' skipped file: {}'.format(file))
 				continue
+
 			# if parse_zip is enabled, check ZIP files to see if it's an image-set
-			elif config.opts['parse_zip'] and file.endswith(zip_ext):
-				imgset = parse_zip_files(root, file)
+			if config.opts['parse_zip'] and file.lower().endswith(zip_ext):
+				imgset = parse_zip_file(root, file)
 				if imgset:
+					# create a separator with the relative directory, but only if it's the first valid file in the dir
+					if new_zip_dir and insert_separators and current_relative_dir is not '.':
+						imagesets.append(current_relative_dir)
+					new_zip_dir = False
+
 					imagesets.append(imgset)
 				continue
 
-			media_info = MediaInfo.parse(os.path.join(root, file))
-			track_general = track_video = track_audio = None
-
-			# get the first video and audio tracks, the rest will be ignored
-			for track in media_info.tracks:
-				if track.track_type == 'General' and not track_general:
-					track_general = track
-				elif track.track_type == 'Video' and not track_video:
-					track_video = track
-				elif track.track_type == 'Audio' and not track_audio:
-					track_audio = track
-
-			# get the useful bits from the track objects
-			if track_video:
-				print(' attempt file: {}'.format(file))
-
+			# parse media file
+			clip = parse_media_file(root, file)
+			if clip:
 				# create a separator with the relative directory, but only if it's the first valid file in the dir
-				if (new_dir and
-					config.opts['recursive'] and
-					config.opts['output_separators'] and not
-					config.opts['output_individual']):
+				if new_dir and insert_separators and current_relative_dir is not '.':
+					clips.append(current_relative_dir)
+				new_dir = False
 
-					current_dir = os.path.relpath(root, config.opts['media_dir'])
-					if current_dir is not '.':
-						clips.append(current_dir)
-					new_dir = False
-
-				filepath = os.path.dirname(track_general.complete_name)
-				filename = track_general.file_name + '.' + track_general.file_extension
-				filesize = track_general.file_size
-				length = track_general.duration
-
-				vcodec = track_video.codec_id
-				vcodec_alt = track_video.format
-				vbitrate = track_video.bit_rate
-				vbitrate_alt = track_general.overall_bit_rate
-				vwidth = track_video.width
-				vheight = track_video.height
-				vscantype = track_video.scan_type
-				vframerate = track_video.frame_rate
-				vframerate_alt = track_video.nominal_frame_rate
-
-				# crazy, I know, but some freaky videos don't have any audio tracks :S
-				if not track_audio:
-					acodec = abitrate = asample = aprofile = None
-				else:
-					acodec = track_audio.format
-					abitrate = track_audio.bit_rate
-					asample = track_audio.sampling_rate
-					aprofile = track_audio.format_profile
-
-				# create Clip object for easier manipulation and passing around
-				clip = Clip(filepath, filename, filesize, length, vcodec, vcodec_alt, vbitrate, vbitrate_alt, vwidth,
-							vheight, vscantype, vframerate, vframerate_alt, acodec, abitrate, asample, aprofile)
 				clips.append(metadata_cleanup(clip))
-				print(' parsed file : {}'.format(file))
-			else:
-				print('ERROR parsing: {}  -  not a video file?'.format(file))
 
 		# break after top level if we don't want recursive parsing
 		if not config.opts['recursive']:
@@ -146,7 +106,7 @@ def parse_media_files():
 		elif config.opts['output_individual'] and (clips or imagesets):
 			# output each dir as a separate file, so we need to reset the clips after each successfully parsed dir
 			parsed_at_all = True
-			format_final_output(clips + imagesets, root)
+			format_final_output({'clips': clips, 'imagesets': imagesets}, root)
 			clips = []
 			imagesets = []
 
@@ -155,21 +115,80 @@ def parse_media_files():
 	elif not clips and not imagesets and not parsed_at_all:
 		print('ERROR: no valid media files found in: {}'.format(config.opts['media_dir']))
 	elif not config.opts['output_individual']:
-		format_final_output(clips + imagesets, config.opts['media_dir'])
+		format_final_output({'clips': clips, 'imagesets': imagesets}, config.opts['media_dir'])
 
 
-def parse_zip_files(root, file):  # TODO add support for rar, 7z, tar, etc.
+def parse_media_file(root, file):
+	"""
+	Uses the pymediainfo module to parse each file and extract media information from each video-clip.
+	Requires MediaInfo and pymediainfo
+	"""
+	try:
+		print(' attempt file: {}'.format(file))
+		media_info = MediaInfo.parse(os.path.join(root, file))
+		track_general = track_video = track_audio = None
+
+		# get the first video and audio tracks, the rest will be ignored
+		for track in media_info.tracks:
+			if track.track_type == 'General' and not track_general:
+				track_general = track
+			elif track.track_type == 'Video' and not track_video:
+				track_video = track
+			elif track.track_type == 'Audio' and not track_audio:
+				track_audio = track
+
+		# get the useful bits from the track objects
+		if track_video:
+			filepath = os.path.dirname(track_general.complete_name)
+			filename = track_general.file_name + '.' + track_general.file_extension
+			filesize = track_general.file_size
+			length = track_general.duration
+
+			vcodec = track_video.codec_id
+			vcodec_alt = track_video.format
+			vbitrate = track_video.bit_rate
+			vbitrate_alt = track_general.overall_bit_rate
+			vwidth = track_video.width
+			vheight = track_video.height
+			vscantype = track_video.scan_type
+			vframerate = track_video.frame_rate
+			vframerate_alt = track_video.nominal_frame_rate
+
+			# crazy, I know, but some freaky videos don't have any audio tracks :S
+			if not track_audio:
+				acodec = abitrate = asample = aprofile = None
+			else:
+				acodec = track_audio.format
+				abitrate = track_audio.bit_rate
+				asample = track_audio.sampling_rate
+				aprofile = track_audio.format_profile
+
+			print(' parsed file : {}'.format(file))
+			# create Clip object for easier manipulation and passing around
+			return Clip(filepath, filename, filesize, length, vcodec, vcodec_alt, vbitrate, vbitrate_alt, vwidth,
+						vheight, vscantype, vframerate, vframerate_alt, acodec, abitrate, asample, aprofile)
+		else:
+			print('ERROR parsing: {}  -  no video track detected'.format(file))
+
+	except AttributeError:
+		print('ERROR parsing: {}  -  malformed video file?'.format(file))
+	except:
+		(errortype, value, traceback) = sys.exc_info()
+		sys.excepthook(errortype, value, traceback)
+
+
+def parse_zip_file(root, file):
 	"""
 	Processes a compressed archive and attempts to get information on the image-set located therein.
 	We could have used MediaInfo for this too, but Pillow is easier and more reliable.
 	Requires Pillow
 	"""
-	from zipfile import ZipFile, BadZipFile
 	try:
+		# TODO import once or switch to MediaInfo after all?
 		from PIL import Image
 	except ImportError:
 		print('\nERROR: Couldn\'t import Pillow module!\n')
-		return False
+		return
 
 	try:
 		print(' attempt archive: {}'.format(file))
@@ -205,14 +224,14 @@ def parse_zip_files(root, file):  # TODO add support for rar, 7z, tar, etc.
 	except BadZipFile:
 		print(' ERROR parsing  : {}  -  unsupported archive type?'.format(file))
 
-	return False
-
 
 def format_final_output(items, source):
 	"""
 	Takes the items (Clips and/or ImageSets) generated from a dir parsing session and determines the formatting to use,
 	combines them with image-host data, and finally writing to the output.
 	"""
+	global tags
+
 	# no items (clips/image-sets)? something is wrong
 	if not items:
 		print('ERROR: No media clips found! The script shouldn\'t even have gotten this far. o_O')
@@ -250,20 +269,9 @@ def format_final_output(items, source):
 	else:
 		file_img_list_fullsize = working_file + '_fullsize.txt'
 
-	# create an output loop for generating all different layouts
-	if config.opts['all_layouts'] and not layouts_busy:
-		try:
-			open(file_output, 'w+').close()  # clear the current output file before starting the loop
-		except (IOError, OSError):
-			print('ERROR: Couldn\'t create output file: {}  (invalid directory?)'.format(file_output))
-			return
-		generate_all_layouts(items, source)
-		return
-
-	# append the output of every cycle rather than truncating the entire output file
-	write_mode = 'a+' if config.opts['all_layouts'] else 'w+'
+	# make output file
 	try:
-		output = open(file_output, write_mode, encoding='utf-8')
+		output = open(file_output, 'w+', encoding='utf-8')
 	except (IOError, OSError):
 		print('ERROR: Couldn\'t create output file: {}  (invalid directory?)'.format(file_output))
 		return
@@ -325,41 +333,80 @@ def format_final_output(items, source):
 	elif img_data_alt:
 		has_alts = True
 
-	# output the corresponding command-line options if we are doing an all_layouts loop, for easy reference
-	if config.opts['all_layouts'] and layouts_busy:
-		command_line_options = ''
-		if not config.opts['output_as_table']:
-			command_line_options += '-l '
-		if not config.opts['embed_images']:
-			command_line_options += '-u '
-		if not config.opts['whole_filename_is_link']:
-			command_line_options += '-t '
+	# everything is set up, now we can finally output something useful
+	if config.opts['all_layouts']:
+		generate_all_layouts(output, items, img_data, img_data_alt, has_alts)
+	else:
+		for _type, _list in items.items():
+			if not _list:
+				continue
+			output.write(format_collection(_type, _list, img_data, img_data_alt, has_alts))
 
-		output.write('\n\nCommand-line options: [size=3][b]{}[/b][/size]\n\n'.format(command_line_options))
+	# append the generated performer tags to the output
+	if tags:
+		output.write('PERFORMER TAGS:  ' + ' '.join(tags) + '\n\n')
+		tags = []  # reset global tags for next run (particularly in recursive mode)
+		print('Performer tags added')
 
-	# if we choose to output the data as a table, we need to set up the table header before the data first row
-	if config.opts['output_as_table'] and config.opts['output_table_titles']:
-		output.write('[table=100%][tr][td={1}][bg={2}][align=center][font={4}][size=5][color={3}]'
-					'[b]{0}[/b][/color][/size][/font][/align][/bg][/td][/tr][/table]'
-					.format(config.opts['tFileDetails'], config.opts['cTHBD'], config.opts['cTHBG'],
-							config.opts['cTHF'], config.opts['fTH']))
-	if config.opts['output_as_table']:
-		output.write('[size=0][align=center][table=100%,{bgc}]\n[tr][th][align=left]Filename + IMG[/align][/th]'
-					'[th]Size[/th][th]Length[/th][th]Codec[/th][th]Resolution[/th][th]Audio[/th]{alt}[/tr]\n'
-					.format(alt="[th]Alt.[/th]" if has_alts else '', bgc=config.opts['cTBBG']))
+	# finished succesfully
+	output.close()
+	print('Output written to: {}'.format(file_output))
 
-	# everything seems okay, now we can finally output something usefulz
-	tags = []
+	# convert the final output to HTML code for quicker testing
+	if config.opts['output_html']:
+		import output_html
+		output_html.format_html_output(file_output, file_output_html)
+
+
+def format_collection(_type, items, img_data, img_data_alt, has_alts):
+	"""
+	Sets up the output for a collection (Clips or ImageSets).
+	"""
+	column_names = None
 	items_parsed = 0
-	imagesets = []
+	output = ''
+
+	# if we choose to output the data as a table, we need to set up the table headers before the data first row
+	if config.opts['output_as_table']:
+
+		# setup columns
+		column_names = ['Filename{}'.format(' + IMG' if config.opts['embed_images'] else '')]
+		if _type == 'clips':
+			title = config.opts['tFileDetails']
+			column_names += ['Size', 'Length', 'Codec', 'Resolution', 'Audio']
+		elif _type == 'imagesets':
+			title = config.opts['tImageSets']
+			column_names += ['Images', 'Resolution', 'Size', 'Unpacked']
+		else:
+			title = '?'
+		if has_alts:
+			column_names += ['Alt.']
+
+		# output table title
+		if config.opts['output_table_titles']:
+			tt = ('[table=100%][tr][td={1}][bg={2}][align=center][font={4}][size=5][color={3}]'
+				'[b]{0}[/b][/color][/size][/font][/align][/bg][/td][/tr][/table]'
+				.format(title, config.opts['cTHBD'], config.opts['cTHBG'], config.opts['cTHF'], config.opts['fTH']))
+			output += tt
+
+		# setup the main table
+		th = '[size=0][align=center][table=100%,{}]\n[tr]'.format(config.opts['cTBBG'])
+		th += '[th][align=left]{}[/align][/th]'.format(column_names[0])
+		for name in column_names[1:]:
+			th += '[th]{}[/th]'.format(name)
+		th += '[/tr]\n'
+		output += th
 
 	# iterate over each item, and do some magic
 	for item in items:
 
 		# if the item is a string, it represents the parsing dir of the following clips/image-sets, i.e. a separator
 		if isinstance(item, str):
-			output.write(format_row_separator(item, has_alts))
+			output += format_row_separator(item, column_names)
 			continue
+		else:
+			# don't count separators towards the final output
+			items_parsed += 1
 
 		# get thumbnail data from image-list and alternative/backup image-list
 		img_match = img_match_alt = None
@@ -379,69 +426,22 @@ def format_final_output(items, source):
 				else:
 					img_match = match
 
-		# try to generate performer tags for presentation, see  generate_tags()
-		tags = generate_tags(tags, item.filename)
-
-		# split off all image-sets, since they will be processed later
-		if isinstance(item, ImageSet):
-			imagesets.append({'item': item, 'img_match': img_match, 'img_match_alt': img_match_alt})
-			continue
+		# try to generate performer tags for presentation, see generate_tags()
+		generate_tags(item.filename)
 
 		# generate and output the item's content row
-		output.write(format_row_output(item, img_match, img_match_alt, has_alts))
-
-		# don't count separators towards the final output
-		if not isinstance(item, str):
-			items_parsed += 1
+		output += format_row_common(item, img_match, img_match_alt, has_alts)
 
 	# if we choose to output the data as a table, we need to set up the table footer after the last data row
 	if config.opts['output_as_table']:
-		output.write('[/table][/align][/size]')
+		output += '[/table][/align][/size]'
 
-	output.write('[size=0][align=right]File information for {} items generated by MediaInfo. {}[/align][/size]'
+	output += ('[size=0][align=right]File information for {} items generated by MediaInfo. {}[/align][/size]\n\n'
 				.format(items_parsed, config.credits_bbcode))
-
-	# process the image-sets we split-off earlier, and create a separate table/list for them at the bottom
-	if imagesets:
-		if config.opts['output_as_table'] and config.opts['output_table_titles']:
-			output.write('\n[table=100%][tr][td={1}][bg={2}][align=center][font={4}][size=5][color={3}]'
-						'[b]{0}[/b][/color][/size][/font][/align][/bg][/td][/tr][/table]'
-						.format(config.opts['tImageSets'], config.opts['cTHBD'], config.opts['cTHBG'],
-								config.opts['cTHF'], config.opts['fTH']))
-		if config.opts['output_as_table']:
-			output.write('[size=0][align=center][table=100%,{bgc}]\n[tr][th][align=left]Filename + IMG[/align][/th]'
-						'[th]Images[/th][th]Resolution[/th][th]Size[/th][th]Unpacked[/th]{alt}[/tr]\n'
-						.format(alt="[th]Alt.[/th]" if has_alts else '', bgc=config.opts['cTBBG']))
-
-		imagesets_parsed = 0
-		for imgset in imagesets:
-			# TODO include separators for image-sets as well
-			output.write(format_row_output(imgset['item'], imgset['img_match'], imgset['img_match_alt'], has_alts))
-			imagesets_parsed += 1
-
-		if config.opts['output_as_table']:
-			output.write('[/table][/align][/size]')
-
-		output.write('[size=0][align=right]File information for {} archives generated. {}[/align][/size]'
-					.format(imagesets_parsed, config.credits_bbcode))
-
-	# append the generated performer tags (if successful) to the output
-	if tags:
-		output.write('\n\nPERFORMER TAGS:  ' + ' '.join(tags) + '\n\n')
-		print('Performer tags added')
-
-	# finished succesfully
-	output.close()
-	print('Output written to: {}'.format(file_output))
-
-	# convert the final output to HTML code for quicker testing
-	if ((config.opts['output_html'] and not config.opts['all_layouts']) or
-		(config.opts['output_html'] and config.opts['all_layouts'] and layouts_last)):
-		import output_html
-		output_html.format_html_output(file_output, file_output_html)
+	return output
 
 
-def format_row_output(item, img_match, img_match_alt, has_alts=False):
+def format_row_common(item, img_match, img_match_alt, has_alts=False):
 	"""
 	Generate the row output based on the input item (a Clip or an ImageSet). Here we mainly do all operations that are
 	common to both 'table' and 'list' outputs, before calling the functions dealing with their differences.
@@ -591,16 +591,21 @@ def format_row_list(item, img_code, img_msg, img_code_alt, img_msg_alt):
 		return ''
 
 
-def format_row_separator(dir_name, has_alts):
+def format_row_separator(dir_name, column_names):
 	"""
 	Formats a separator row with the current parsing directory. For prettier organizing of rows.
 	"""
 	if config.opts['output_as_table']:
-		# most BBCode engines don't support col-span  # TODO nb support is common?
-		return '[tr={2}][td=nb][align=left][size=3][color={3}][b]{0}[/b][/color][/size][/align][/td]' \
-			'{1}{1}{1}{1}{1}{alt}[/tr]\n' \
-			.format(dir_name, '[td=nb][/td]', config.opts['cTSEPBG'], config.opts['cTSEPF'],
-					alt="[td=nb][/td]" if has_alts else '')
+		td_opts = 'nb'  # TODO nb support is common?
+		if config.opts['cTSEPF']:
+			td_inner = '[size=3][color={1}][b]{0}[/b][/color][/size]'.format(dir_name, config.opts['cTSEPF'])
+		else:
+			td_inner = '[size=3][b]{0}[/b][/size]'.format(dir_name)
+		tr = ('[tr={1}][td={2}][align=left]{0}[/align][/td]'.format(td_inner, config.opts['cTSEPBG'], td_opts))
+		for name in column_names[1:]:
+			tr += '[td={1}]{0}[/td]'.format(name, td_opts)
+		tr += '[/tr]\n'
+		return tr
 	else:
 		# just a boring row with the directory name
 		return '[size=2]- [b][i]{}[/i][/b][/size]\n'.format(dir_name)
@@ -742,7 +747,7 @@ def get_img_list(file_img_list, is_alt=False):
 			# We always check for the _alt.txt image-list. But if there doesn't appear to be a file to parse,
 			# we should assume that the user simply doesn't with to use this feature, and just ignore it.
 			print('NOTICE: No corresponding alternative image-list found. Looked for: {}'.format(file_img_list))
-			return None
+			return
 		else:
 			error = ('WARNING: No corresponding image-list found! Looked for: {}'.format(file_img_list))
 			print(error)
@@ -885,15 +890,13 @@ def get_screenshot_hash(filename, filepath, algorithm, strlen):
 			img = open(ss_found, 'rb').read()
 		except (IOError, OSError):
 			print('ERROR: Couldn\'t open the following image to calculate hash: {}'.format(ss_found))
-			return None
+			return
+
 		if 'md5' in algorithm:
 			print('calculating MD5 hash for: {}'.format(ss_found))
 			return md5(img).hexdigest()[:strlen]
-		else:
-			return None
 	else:
 		print('WARNING: Couldn\'t find screenshot file for: {}'.format(filename))
-		return None
 
 
 def slugify(filename, img_host):
@@ -936,7 +939,7 @@ def slugify(filename, img_host):
 		slug = re.sub('[^\w\s.-]', '', slug_unicode).strip()
 		slug = re.sub('[\s]+', '_', slug)
 	else:
-		return False
+		return
 
 	return slug
 
@@ -948,7 +951,7 @@ def match_slug(img_list, file_slug, file_img_list):
 	"""
 	# file slugs can be None when get_screenshot_hash() isn't successful
 	if not file_slug:
-		return False
+		return
 
 	matches = []
 	for img in img_list:
@@ -966,7 +969,6 @@ def match_slug(img_list, file_slug, file_img_list):
 		return matches
 	else:
 		print('WARNING: No corresponding image-url found for "{0}" in: {1}'.format(file_slug, file_img_list))
-		return False
 
 
 def debug_imghost_matching(ifile='./tests/input.txt', hdir='./tests/image-hosts/', mdir='./tests/upload/'):
@@ -1068,13 +1070,14 @@ def debug_imghost_matching(ifile='./tests/input.txt', hdir='./tests/image-hosts/
 				index += 1
 
 
-def generate_tags(tags, filename):
+def generate_tags(filename):
 	"""
 	Generates tags for all performers present in the file-names as a whole (YMMV).
 	This is handy for music videos, which often have credited performers in the file-name rather than the meta-data.
 	All tags will be common format. So "Michael Jackson ft. Bruno Mars - Song" outputs "michael.jackson bruno.mars"
 	Note that this will NOT capture "avicii" in something like: Performer - Song (Avicii Remix)
 	"""
+	global tags
 	segments = []
 
 	# find the names located before the movie title (everything before the " - " separator)
@@ -1105,56 +1108,42 @@ def generate_tags(tags, filename):
 				elif tag not in tags:
 					tags.append(tag)
 
-	return tags
 
-
-def generate_all_layouts(items, source):
+def generate_all_layouts(output, items, img_data, img_data_alt, has_alts):
 	"""
-	Hijacks the output function and runs it multiple times with differing settings to generate all possible layouts.
+	Runs format_collection() multiple times with differing settings to generate all possible layouts.
 	"""
-	global layouts_busy, layouts_last
 	original_opts = copy.copy(config.opts)
-	layouts_busy = True
-	layouts_last = False
 
-	config.opts['output_as_table'] = True
-	config.opts['embed_images'] = True
-	config.opts['whole_filename_is_link'] = True
-	format_final_output(items, source)
+	variants = [[True, True, True],
+				[True, False, True],
+				[True, True, False],
+				[True, False, False],
+				[False, False, True],
+				[False, True, False],
+				[False, False, False]]
 
-	config.opts['output_as_table'] = True
-	config.opts['embed_images'] = False
-	config.opts['whole_filename_is_link'] = True
-	format_final_output(items, source)
+	for opts in variants:
+		config.opts['output_as_table'] = opts[0]
+		config.opts['embed_images'] = opts[1]
+		config.opts['whole_filename_is_link'] = opts[2]
 
-	config.opts['output_as_table'] = True
-	config.opts['embed_images'] = True
-	config.opts['whole_filename_is_link'] = False
-	format_final_output(items, source)
+		# output the corresponding command-line options if we are doing an all_layouts loop, for easy reference
+		command_line_options = ''
+		if not config.opts['output_as_table']:
+			command_line_options += '-l '
+		if not config.opts['embed_images']:
+			command_line_options += '-u '
+		if not config.opts['whole_filename_is_link']:
+			command_line_options += '-t '
 
-	config.opts['output_as_table'] = True
-	config.opts['embed_images'] = False
-	config.opts['whole_filename_is_link'] = False
-	format_final_output(items, source)
+		output.write('\n\nCommand-line options: [size=3][b]{}[/b][/size]\n\n'.format(command_line_options))
 
-	config.opts['output_as_table'] = False
-	config.opts['embed_images'] = False
-	config.opts['whole_filename_is_link'] = True
-	format_final_output(items, source)
+		for _type, _list in items.items():
+			if not _list:
+				continue
+			output.write(format_collection(_type, _list, img_data, img_data_alt, has_alts))
 
-	config.opts['output_as_table'] = False
-	config.opts['embed_images'] = True
-	config.opts['whole_filename_is_link'] = False
-	format_final_output(items, source)
-
-	layouts_last = True
-
-	config.opts['output_as_table'] = False
-	config.opts['embed_images'] = False
-	config.opts['whole_filename_is_link'] = False
-	format_final_output(items, source)
-
-	layouts_busy = False
 	config.opts = original_opts
 
 

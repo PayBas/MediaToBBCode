@@ -1,4 +1,8 @@
+#!/usr/bin/env python3
 # coding=utf-8
+# Copyright 2017 PayBas
+# All Rights Reserved.
+
 import os
 import re
 import sys
@@ -19,6 +23,7 @@ class QtGUI(QMainWindow):
 
 		self.widgets = {}  # dictionary of some mutable widgets, for easier manipulation
 		self.parse_thread = None  # defined here just to appease PEP
+		self.parse_worker = None  # defined here just to appease PEP
 
 		central_widget = QWidget(self)
 		central_layout = QGridLayout(central_widget)
@@ -489,15 +494,11 @@ class QtGUI(QMainWindow):
 		self.get_gui_values()
 		self.log_text.clear()
 
-		self.parse_thread = QtGUI.ParseThread()
-
-		# TODO: see ParseThread()
-		# self.parse_thread = QThread()
-		# self.parse_worker = self.ParseWorker()
-		# self.parse_worker.moveToThread(self.parse_thread)
-		# self.parse_worker.finished.connect(self.run_finish)
-		# self.parse_thread.started.connect(self.parse_worker.run)
-
+		self.parse_thread = QThread()
+		self.parse_worker = self.ParseWorker()
+		self.parse_worker.moveToThread(self.parse_thread)
+		self.parse_worker.finished.connect(self.run_finish)
+		self.parse_thread.started.connect(self.parse_worker.run)
 		self.parse_thread.finished.connect(self.run_finish)
 		self.parse_thread.start()
 
@@ -578,7 +579,8 @@ class QtGUI(QMainWindow):
 
 	class ParseWorker(QObject):
 		"""
-		Currently not implemented, see ParseThread()
+		Note to self: disable "PyQt compatible" in Python debugger settings, or this will break.
+		http://stackoverflow.com/a/6789205
 		"""
 		finished = pyqtSignal()
 
@@ -588,24 +590,6 @@ class QtGUI(QMainWindow):
 			try:
 				core.set_paths_and_run()
 				self.finished.emit()
-			except:
-				(errortype, value, traceback) = sys.exc_info()
-				sys.excepthook(errortype, value, traceback)
-				self.exit()
-
-	class ParseThread(QThread):
-		"""
-		I know subclassing QThread is bad, but there seems to be a bug either with my setup or PyQt 5.8.1,
-		whereby no thread is created using the "moveToThread" method.
-		Confirmed this with http://stackoverflow.com/a/6789205 (using_move_to_thread())
-		"""
-		def __init__(self):
-			super().__init__()
-
-		def run(self):
-			# noinspection PyBroadException
-			try:
-				core.set_paths_and_run()
 			except:
 				(errortype, value, traceback) = sys.exc_info()
 				sys.excepthook(errortype, value, traceback)

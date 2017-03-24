@@ -1,4 +1,8 @@
+#!/usr/bin/env python3
 # coding=utf-8
+# Copyright 2017 PayBas
+# All Rights Reserved.
+
 import webbrowser
 
 

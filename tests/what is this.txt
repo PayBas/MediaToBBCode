@@ -1,1 +1,0 @@
-Just some files for debugging image-host output and file-name slugification. Users can ignore all this.

@@ -8,6 +8,7 @@ import os
 import re
 import sys
 import unicodedata
+from collections import OrderedDict
 from hashlib import md5
 from urllib.parse import urlparse
 from zipfile import ZipFile, BadZipFile
@@ -112,7 +113,7 @@ def parse_files():
 		elif config.opts['output_individual'] and (clips or imagesets):
 			# output each dir as a separate file, so we need to reset the clips after each successfully parsed dir
 			parsed_at_all = True
-			generate_output({'clips': clips, 'imagesets': imagesets}, root)
+			generate_output(OrderedDict([('clips', clips), ('imagesets', imagesets)]), root)
 			clips = []
 			imagesets = []
 
@@ -121,7 +122,7 @@ def parse_files():
 	elif not clips and not imagesets and not parsed_at_all:
 		print('ERROR: no valid media files found in: {}'.format(config.opts['media_dir']))
 	elif not config.opts['output_individual']:
-		generate_output({'clips': clips, 'imagesets': imagesets}, config.opts['media_dir'])
+		generate_output(OrderedDict([('clips', clips), ('imagesets', imagesets)]), config.opts['media_dir'])
 
 
 def parse_media_file(root, file):
@@ -131,8 +132,17 @@ def parse_media_file(root, file):
 	try:
 		print(' attempt file: {}'.format(file))
 		media_info = MediaInfo.parse(os.path.join(root, file))
-		track_general = track_video = track_audio = None
+	except OSError as error:
+		print(error)
+		return
+	except:
+		(errortype, value, traceback) = sys.exc_info()
+		sys.excepthook(errortype, value, traceback)
+		return
 
+	track_general = track_video = track_audio = None
+
+	try:
 		# get the first video and audio tracks, the rest will be ignored
 		for track in media_info.tracks:
 			if track.track_type == 'General' and not track_general:
@@ -177,9 +187,6 @@ def parse_media_file(root, file):
 
 	except AttributeError:
 		print('ERROR parsing: {}  -  malformed video file?'.format(file))
-	except:
-		(errortype, value, traceback) = sys.exc_info()
-		sys.excepthook(errortype, value, traceback)
 
 
 def parse_zip_file(root, file):
@@ -1019,14 +1026,12 @@ def match_slug(img_list, file_slug, file_img_list):
 		print('WARNING: No corresponding image-url found for "{}" in: {}'.format(file_slug, file_img_list))
 
 
-def debug_imghost_matching(ifile='./tests/input.txt', hdir='./tests/image-hosts/', mdir='./tests/upload/'):
+def debug_imghost_matching(_dir='../tests/image-hosts/'):
 	"""
-	Debug method for easier testing of image-host output. Compares a predefined list of file-names to the output of
-	various image-hosts and provides digestible information on how the slugs are formed.
+	Debug method for easier testing of image-host output. Compares a the file-names of a collection of images to 
+	the output of various image-hosts and provides digestible information on how the slugs are formed.
 	"""
-	ifile = os.path.normpath(ifile)
-	hdir = os.path.normpath(hdir)
-	mdir = os.path.normpath(mdir)
+	img_dir = os.path.normpath(os.path.join(_dir, 'images'))
 
 	# from: https://svn.blender.org/svnroot/bf-blender/trunk/blender/build_files/scons/tools/bcolors.py
 	c = {
@@ -1041,22 +1046,22 @@ def debug_imghost_matching(ifile='./tests/input.txt', hdir='./tests/image-hosts/
 	}
 
 	try:
-		test_names = open(ifile)
+		test_names = os.listdir(img_dir)
 	except (IOError, OSError):
-		print('{1}ERROR: No input file found for testing! Looked for:{2} {0}'.format(ifile, c['FAIL'], c['ENDC']))
+		print('{1}ERROR: "{0}" doesn\'t exist!{2}'.format(img_dir, c['FAIL'], c['ENDC']))
 		return
 
-	test_names = test_names.read().splitlines()
+	# test_names = test_names.read().splitlines()
 	if not test_names:
-		print('{1}ERROR: No file-names found for testing in:{2} {0}'.format(ifile, c['FAIL'], c['ENDC']))
+		print('{1}ERROR: No image-files found for testing in:{2} {0}'.format(img_dir, c['FAIL'], c['ENDC']))
 		return
 
 	# try each image-host output file
-	for hfile in os.listdir(hdir):
-		if hfile.endswith('.txt') or hfile.endswith('.TXT'):
-			print('\n{1}TEST HOST{2}  : {0}'.format(hfile, c['HEAD'], c['ENDC']))
+	for host_file in os.listdir(_dir):
+		if host_file.lower().endswith('.txt'):
+			print('\n{1}TEST HOST{2}  : {0}'.format(host_file, c['HEAD'], c['ENDC']))
 
-			img_data = get_img_list(os.path.join(hdir, hfile))
+			img_data = get_img_list(os.path.join(_dir, host_file))
 			if not img_data:
 				continue
 
@@ -1067,7 +1072,7 @@ def debug_imghost_matching(ifile='./tests/input.txt', hdir='./tests/image-hosts/
 
 				# get the file-name slug
 				if 'imagebam' in img_data['host']:
-					file_slug = get_screenshot_hash(name, mdir, 'md5', 6)
+					file_slug = get_screenshot_hash(name, img_dir, 'md5', 6)
 				else:
 					file_slug = slugify(name, img_data['host'])
 
@@ -1099,7 +1104,7 @@ def debug_imghost_matching(ifile='./tests/input.txt', hdir='./tests/image-hosts/
 					img_list = img_data['img_list']
 
 				# do the matching, and output something understandable (hopefully)
-				matches = match_slug(img_list, file_slug, hfile)
+				matches = match_slug(img_list, file_slug, host_file)
 
 				if matches and len(matches) == 1:
 					print('file-slug  : {1}{0}'.format(file_slug, ' ' * matches[0]['match_pos']))

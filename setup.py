@@ -4,15 +4,17 @@
 # All Rights Reserved.
 
 from setuptools import setup, find_packages
+from mediatobbcode import config
 
 setup(
 	name='MediaToBBCode',
-	version='1.2.4',
-	author='PayBas',
+	version=config.version,
+	author=config.author,
 	author_email='paybas@gmail.com',
-	url='https://github.com/PayBas/MediaToBBCode/',
+	url=config.script_url,
 	description='Parse media files and output to BBCode.',
-	long_description='A Python script that combines the metadata output of MediaInfo with the BBCode output of various image-hosts to automatically generate a BBCode-formatted presentation of a media-clips collection. ',
+	long_description=('A Python script that combines the metadata output of MediaInfo with the BBCode output of various '
+					'image-hosts to automatically generate a BBCode-formatted presentation of a media-clips collection.'),
 	packages=find_packages(),
 	include_package_data=True,
 	license='GNU General Public License v3 (GPLv3)',

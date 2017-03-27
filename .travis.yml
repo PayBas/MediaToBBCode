@@ -3,6 +3,10 @@ python:
   - 3.4
   - 3.5
   - 3.6
+addons:
+  apt:
+    packages:
+      - libmms0
 before_script:
   - wget http://mediaarea.net/download/binary/libmediainfo0/0.7.93/libmediainfo0_0.7.93-1_amd64.xUbuntu_12.04.deb
   - wget http://mediaarea.net/download/binary/libzen0/0.4.34/libzen0_0.4.34-1_amd64.xUbuntu_12.04.deb
@@ -11,4 +15,4 @@ before_script:
   - ar x libzen0_0.4.34-1_amd64.xUbuntu_12.04.deb
   - tar xf data.tar.gz
 script:
-  - python3 setup.py test
+  - LD_LIBRARY_PATH=usr/lib/x86_64-linux-gnu/ python3 setup.py test

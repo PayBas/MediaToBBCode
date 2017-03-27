@@ -31,9 +31,9 @@ class FullRunTest(unittest.TestCase):
 
 		with open(self.output_file) as file:
 			output = file.read()
+		os.remove(self.output_file)
 
 		self.assertEqual(correct, output)
-		os.remove(self.output_file)
 
 	def testFullSize(self):
 		config.populate_opts()
@@ -51,8 +51,8 @@ class FullRunTest(unittest.TestCase):
 		with open(self.output_file) as file:
 			output = file.read()
 
-		self.assertEqual(correct, output)
 		os.remove(self.output_file)
+		self.assertEqual(correct, output)
 
 	def testImageSets(self):
 		config.populate_opts()
@@ -69,5 +69,5 @@ class FullRunTest(unittest.TestCase):
 		with open(self.output_file) as file:
 			output = file.read()
 
-		self.assertEqual(correct, output)
 		os.remove(self.output_file)
+		self.assertEqual(correct, output)

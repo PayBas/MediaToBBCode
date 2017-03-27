@@ -942,14 +942,15 @@ def get_screenshot_hash(filename, filepath, algorithm, strlen):
 	# generate the hash for the found image
 	if ss_found:
 		try:
-			img = open(ss_found, 'rb').read()
+			with open(ss_found, 'rb') as img:
+				data = img.read()
 		except (IOError, OSError):
 			print('ERROR: Couldn\'t open the following image to calculate hash: {}'.format(ss_found))
 			return
 
 		if 'md5' in algorithm:
 			print('calculating MD5 hash for: {}'.format(ss_found))
-			return md5(img).hexdigest()[:strlen]
+			return md5(data).hexdigest()[:strlen]
 	else:
 		print('WARNING: Couldn\'t find screenshot file for: {}'.format(filename))
 

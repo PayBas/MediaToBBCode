@@ -12,7 +12,7 @@ from hashlib import md5
 from urllib.parse import urlparse
 from zipfile import ZipFile, BadZipFile
 from pymediainfo import MediaInfo
-import config
+from mediatobbcode import config
 
 cERR = '#F00'  # output color for errors
 cWARN = '#F80'  # output color for warnings

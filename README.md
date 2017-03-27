@@ -1,9 +1,9 @@
-MediaToBBCode.py
+MediaToBBCode.py [![Build Status](https://travis-ci.org/PayBas/MediaToBBCode.svg?branch=master)](https://travis-ci.org/PayBas/MediaToBBCode)
 ==========
 
 A Python script that combines the metadata output of [MediaInfo](http://mediaarea.net/en/MediaInfo) with the BBCode output of various image-hosts to automatically generate a BBCode-formatted presentation of a media-clips collection.
 
-![Screenshot](docs/images/screenshot_output.png)
+![Screenshot of output](docs/images/screenshot_output.png)
 
 Besides the aesthetics, there's value in having file metadata in your online posts/presentations. Image-hosts will not be online forever. This way, users can find and compare files longer into the future.
 
@@ -11,7 +11,7 @@ This script can save you quite a lot of time by automating the most tedious part
 
 It comes with a simple GUI.
 
-![Screenshot2](docs/images/screenshot_gui.png)
+![Screenshot of GUI](docs/images/screenshot_gui.png)
 
 ## Features
 - Easy GUI for those not wanting to use the command-line.

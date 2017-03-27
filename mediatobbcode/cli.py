@@ -5,8 +5,7 @@
 
 import getopt
 import sys
-import config
-import core
+from mediatobbcode import config, core
 
 
 def main(argv):

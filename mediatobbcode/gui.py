@@ -12,8 +12,7 @@ from PyQt5.QtGui import QColor, QFont, QIcon, QTextCursor
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QGridLayout, QHBoxLayout, QGroupBox, QTabWidget,
 	QLabel, QLineEdit, QPlainTextEdit, QCheckBox, QPushButton, QFrame, QFileDialog, QColorDialog, QMessageBox)
 from dottorrentGUI import gui as dott_gui
-import config
-import core
+from mediatobbcode import config, core
 
 
 # noinspection PyArgumentList, PyUnresolvedReferences, PyTypeChecker, PyCallByClass

@@ -5,6 +5,7 @@
 
 import getopt
 import sys
+
 from mediatobbcode import config, core
 
 
@@ -15,20 +16,21 @@ def main(argv):
 	# set the default opts as initial values
 	config.populate_opts()
 
-	h = 'cli.py\n' \
-		'- parse current dir using default options\n\n' \
-		'cli.py -m <media dir>\n' \
-		'- parse all media files in dir -m and output to -m\n\n' \
-		'cli.py -m <media dir> -o <output dir>\n' \
-		'- parse all media files in dir -m and output to -o\n\n' \
-		'cli.py -m <media dir> -r -o <output dir>\n' \
-		'- parse all media files in -m recursively and output to -o\n\n' \
-		'cli.py -c <config file>\n' \
-		'- use previously saved config file to set script options\n\n' \
-		'For a full list of command-line options, see the online documentation.'
+	h = ('cli.py\n'
+		'- parse current dir using default options\n\n'
+		'cli.py -m <media dir>\n'
+		'- parse all media files in dir -m and output to -m\n\n'
+		'cli.py -m <media dir> -o <output dir>\n'
+		'- parse all media files in dir -m and output to -o\n\n'
+		'cli.py -m <media dir> -r -o <output dir>\n'
+		'- parse all media files in -m recursively and output to -o\n\n'
+		'cli.py -c <config file>\n'
+		'- use previously saved config file to set script options\n\n'
+		'For a full list of command-line options, see the online documentation.')
 
 	try:
-		options, args = getopt.getopt(argv, 'hvm:o:rzlbifuntsawqc:x',
+		options, args = getopt.getopt(
+			argv, 'hvm:o:rzlbifuntsawqc:x',
 			['help', 'version', 'mediadir=', 'outputdir=', 'recursive', 'zip', 'list', 'bare', 'individual', 'flat',
 			'url', 'nothumb', 'tinylink', 'suppress', 'all', 'webhtml', 'fullsize', 'config=', 'xdebug'])
 

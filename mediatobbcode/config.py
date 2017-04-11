@@ -59,8 +59,8 @@ author = 'PayBas'
 author_url = 'https://github.com/PayBas'
 script = 'MediaToBBCode.py'
 script_url = 'https://github.com/PayBas/MediaToBBCode'
-version = '1.2.4'
-compile_date = '27-03-2017'
+version = '1.2.5'
+compile_date = '08-04-2017'
 credits_bbcode = 'Output script by [url={}]PayBas[/url].'.format(script_url)
 
 

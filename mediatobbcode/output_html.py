@@ -18,7 +18,9 @@ def format_html_output(file_output, file_output_html):
 		return
 
 	try:
-		bbcinput = open(file_output, encoding='utf-8')
+		with open(file_output, encoding='utf-8') as bbcinput:
+			content = bbcinput.read()
+			content = content.replace('\'', '±')  # temporary replacement, parser doesn't like '
 	except (IOError, OSError):
 		print('ERROR: Couldn\'t reopen file for conversion to HTML: {}'.format(file_output))
 		return
@@ -28,9 +30,6 @@ def format_html_output(file_output, file_output_html):
 	except (IOError, OSError):
 		print('ERROR: Couldn\'t create HTML output file: {}  (invalid directory?)'.format(file_output_html))
 		return
-
-	content = bbcinput.read()
-	content = content.replace('\'', '±')  # temporary replacement, parser doesn't like '
 
 	# only simple width and background-color options supported for now
 	def render_table(tag_name, value, options, parent, context):
@@ -112,8 +111,8 @@ def format_html_output(file_output, file_output_html):
 			link = options['spoiler']
 		else:
 			link = 'HTML parsing error?'
-		return '<strong>{}</strong>: <a href="javascript:void(0);" class="sp">Show</a>' \
-			'<blockquote class="bq">{}</blockquote>'.format(link, value)
+		return ('<strong>{}</strong>: <a href="javascript:void(0);" class="sp">Show</a>'
+			'<blockquote class="bq">{}</blockquote>'.format(link, value))
 
 	parser = bbcode.Parser(newline='<br />\n')
 	parser.add_simple_formatter('th', '<th>%(value)s</th>')
@@ -129,21 +128,20 @@ def format_html_output(file_output, file_output_html):
 	parser.add_formatter('spoiler', render_spoiler)
 
 	html_content = parser.format(content).replace('±', '\'')
-	html_css = \
-		'body {font: normal 10pt "Lucida Grande", Helvetica, Arial, sans-serif; max-width: 1200px; margin: 0 auto;}\n' \
-		'table {border-collapse: collapse;}\n' \
-		'table, td {border: 1px solid #aaa;}\n' \
-		'table.noborder, table.noborder td {border: none}\n' \
-		'th, td {padding: 3px 5px;}\n' \
-		'.bq {display: none;}\n' \
-		'.thumb {max-width: 400px;}\n' \
-		'a.sp:focus ~ .bq, .bq:focus {display: block;}\n'
+	html_css = (
+		'body {font: normal 10pt "Lucida Grande", Helvetica, Arial, sans-serif; max-width: 1200px; margin: 0 auto;}\n'
+		'table {border-collapse: collapse;}\n'
+		'table, td {border: 1px solid #aaa;}\n'
+		'table.noborder, table.noborder td {border: none}\n'
+		'th, td {padding: 3px 5px;}\n'
+		'.bq {display: none;}\n'
+		'.thumb {max-width: 400px;}\n'
+		'a.sp:focus ~ .bq, .bq:focus {display: block;}\n')
 	html_file.write('<!DOCTYPE html>\n<html>\n<head>\n<meta charset="UTF-8">\n<title>Test</title>\n'
 					'<style type="text/css">\n{1}\n</style>\n</head>\n<body>\n{0}\n</body>\n</html>\n'
 					.format(html_content, html_css))
 	print('HTML output written to: {}'.format(file_output_html))
 
-	bbcinput.close()
 	html_file.close()
 
 	webbrowser.open(file_output_html, new=2)

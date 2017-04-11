@@ -32,19 +32,19 @@ These requirements only apply if you're using the python script. The executable 
 - [Python 3.4+](https://www.python.org/downloads/)
 - [MediaInfo](https://mediaarea.net/en/MediaInfo/Download) (32/64bit dll/lib must match Python environment)
 - [pymediainfo](https://pypi.python.org/pypi/pymediainfo)
+- [Pillow](https://python-pillow.org/)
 - [PyQt5](https://riverbankcomputing.com/software/pyqt/intro) (if you wish to use the GUI)
 - [dottorrent-gui](https://github.com/kz26/dottorrent-gui) (if you wish to use the GUI)
-- [Pillow](https://python-pillow.org/) (if you wish to process image-sets)
-- [bbcode](https://pypi.python.org/pypi/bbcode/1.0.19) (if you wish to output as HTML)
+- [bbcode](https://pypi.python.org/pypi/bbcode) (if you wish to output as HTML)
 
 For Ubuntu this would be something like:
 ````
 sudo apt install mediainfo    # MediaInfo library
 sudo apt install python3-pip  # python package manager
 pip3 install pymediainfo      # python interface for MediaInfo
+pip3 install Pillow           # python imaging library for parsing image-sets
 pip3 install PyQt5            # if you wish to use the GUI
 pip3 install dottorrent-gui   # if you wish to use the GUI
-pip3 install pillow           # if you wish to process image-sets
 pip3 install bbcode           # if you wish to output as HTML
 ````
 

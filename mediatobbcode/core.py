@@ -12,7 +12,10 @@ from collections import OrderedDict
 from hashlib import md5
 from urllib.parse import urlparse
 from zipfile import ZipFile, BadZipFile
+
 from pymediainfo import MediaInfo
+from PIL import Image
+
 from mediatobbcode import config
 
 cERR = '#F00'  # output color for errors
@@ -193,15 +196,9 @@ def parse_zip_file(root, file):
 	"""
 	Processes a compressed archive and attempts to get information on the image-set located therein.
 	We could have used MediaInfo for this too, but Pillow is easier and more reliable.
-	Requires Pillow
+	Additionally, pymediainfo (and perhaps the MediaInfo lib itself) require an actual file-url to parse an object.
+	This would require us to create a tempfile for each read/extracted image, before being able to parse it.
 	"""
-	try:
-		# TODO import once or switch to MediaInfo after all?
-		from PIL import Image
-	except ImportError:
-		print('\nERROR: Couldn\'t import Pillow module!\n')
-		return
-
 	try:
 		print(' attempt archive: {}'.format(file))
 		# each archive is an entire image-set, so we'll get some basic information on the set
@@ -1202,7 +1199,8 @@ def generate_all_layouts(output, prepared_items, has_alts):
 
 
 class Clip(object):
-	def __init__(self, filepath, filename, filesize, length, vcodec, vcodec_alt, vbitrate, vbitrate_alt,
+	def __init__(self, filepath, filename, filesize, length,
+				vcodec, vcodec_alt, vbitrate, vbitrate_alt,
 				vwidth, vheight, vscantype, vframerate, vframerate_alt,
 				acodec, abitrate, asample, aprofile):
 

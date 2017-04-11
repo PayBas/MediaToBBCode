@@ -7,11 +7,13 @@ import os
 import re
 import sys
 import webbrowser
+
 from PyQt5.QtCore import Qt, QObject, QThread, pyqtSignal, pyqtSlot
 from PyQt5.QtGui import QColor, QFont, QIcon, QTextCursor
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QGridLayout, QHBoxLayout, QGroupBox, QTabWidget,
 	QLabel, QLineEdit, QPlainTextEdit, QCheckBox, QPushButton, QFrame, QFileDialog, QColorDialog, QMessageBox)
 from dottorrentGUI import gui as dott_gui
+
 from mediatobbcode import config, core
 
 
@@ -102,16 +104,16 @@ class QtGUI(QMainWindow):
 		note_mopts = QGroupBox('Note', tab_mopts)
 		layout_note_mopts = QGridLayout(note_mopts)
 
-		label_mopts = 'You do not need to use these options if your image-list files are set correctly (see ' \
-			'documentation), because the script will automatically look for the appropriate .txt files. ' \
-			'But you can manually specify them here if the automatic feature doesn\'t work for you.'
+		label_mopts = ('You do not need to use these options if your image-list files are set correctly (see '
+			'documentation), because the script will automatically look for the appropriate .txt files. '
+			'But you can manually specify them here if the automatic feature doesn\'t work for you.')
 		self.label_mopts = QLabel(label_mopts, note_mopts)
 		self.label_mopts.setWordWrap(True)
 		layout_note_mopts.addWidget(self.label_mopts)
 
-		label_mopts_disabled = 'You are using the option to output each directory as an individual file. ' \
-			'This means you will have to rely on the automated script. It will try to find the correct image-list ' \
-			'files for each directory. Carefully check the output log for potential problems.'
+		label_mopts_disabled = ('You are using the option to output each directory as an individual file. '
+			'This means you will have to rely on the automated script. It will try to find the correct image-list '
+			'files for each directory. Carefully check the output log for potential problems.')
 		self.label_mopts_disabled = QLabel(label_mopts_disabled, note_mopts)
 		self.label_mopts_disabled.setWordWrap(True)
 		self.label_mopts_disabled.setVisible(True)

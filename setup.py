@@ -20,7 +20,7 @@ setup(
 	license='GNU General Public License v3 (GPLv3)',
 	tests_require=['nose'],
 	test_suite="nose.collector",
-	install_requires=['pymediainfo', 'pillow', 'bbcode'],
+	install_requires=['pymediainfo', 'Pillow', 'bbcode'],
 	classifiers=[
 		'Development Status :: 5 - Production/Stable',
 		'Programming Language :: Python',
